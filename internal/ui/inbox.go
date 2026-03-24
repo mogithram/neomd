@@ -14,7 +14,9 @@ import (
 
 // emailItem wraps imap.Email to satisfy bubbles/list.Item.
 type emailItem struct {
-	email imap.Email
+	email  imap.Email
+	index  int  // position in list (1-based)
+	marked bool // selected for batch operation
 }
 
 func (e emailItem) FilterValue() string {
@@ -27,9 +29,17 @@ func (e emailItem) Description() string { return e.email.From }
 // emailDelegate is a custom list.ItemDelegate that renders one email per row.
 type emailDelegate struct{}
 
-func (d emailDelegate) Height() int                             { return 1 }
-func (d emailDelegate) Spacing() int                           { return 0 }
+func (d emailDelegate) Height() int                              { return 1 }
+func (d emailDelegate) Spacing() int                            { return 0 }
 func (d emailDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+
+// Column widths
+const (
+	colNumWidth  = 4  // "  1 "
+	colFlagWidth = 2  // "N " or "  "
+	colDateWidth = 7  // "Feb 03 "
+	colSizeWidth = 7  // "(38.2K)"
+)
 
 func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	e, ok := item.(emailItem)
@@ -38,75 +48,125 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	}
 
 	isSelected := index == m.Index()
+	unread := !e.email.Seen
 
-	// Unread indicator
-	indicator := "  "
-	fromStyle := styleRead
-	if !e.email.Seen {
-		indicator = "● "
-		fromStyle = styleUnread
-	}
-
-	// Truncate from and subject to fit terminal width
 	width := m.Width()
 	if width <= 0 {
 		width = 80
 	}
-	dateStr := fmtDate(e.email.Date)
-	dateWidth := len(dateStr) + 2
-	fromMax := 25
-	subjectMax := width - fromMax - dateWidth - 6
-	if subjectMax < 10 {
-		subjectMax = 10
+
+	// Fixed columns
+	num := fmt.Sprintf("%3d ", e.index)
+	// Flag column: mark takes priority; show unread alongside mark
+	flag := "  "
+	switch {
+	case e.marked && !e.email.Seen:
+		flag = "*N"
+	case e.marked:
+		flag = "* "
+	case unread:
+		flag = "N "
+	}
+	dateStr := fmtDate(e.email.Date) + " "
+	sizeStr := fmtSize(e.email.Size)
+
+	fixed := colNumWidth + colFlagWidth + colDateWidth + colSizeWidth + 2 // 2 spaces padding
+	fromMax := 20
+	subjectMax := width - fixed - fromMax - 2
+	if subjectMax < 8 {
+		subjectMax = 8
 	}
 
-	from := truncate(e.email.From, fromMax)
+	from := truncate(cleanFrom(e.email.From), fromMax)
 	subject := truncate(e.email.Subject, subjectMax)
 
-	row := fmt.Sprintf("%s%-*s  %-*s  %s",
-		indicator,
-		fromMax, from,
-		subjectMax, subject,
-		dateStr,
-	)
-
 	if isSelected {
-		row = styleSelected.Render(row)
-	} else {
-		// Apply from style to the whole line (unread = brighter)
-		_ = fromStyle // style applied via indicator colour above
-		row = lipgloss.NewStyle().Foreground(colorText).Render(row)
-		if !e.email.Seen {
-			row = lipgloss.NewStyle().Foreground(colorUnread).Bold(true).Render(row)
-		}
+		row := fmt.Sprintf("%s%s%s%-*s  %-*s  %s",
+			num, flag, dateStr,
+			fromMax, from,
+			subjectMax, subject,
+			sizeStr,
+		)
+		fmt.Fprint(w, styleSelected.Render(row))
+		return
 	}
 
-	fmt.Fprint(w, row)
+	// Colorise each column separately
+	numS := lipgloss.NewStyle().Foreground(colorNumber).Render(num)
+	var flagS string
+	switch {
+	case e.marked:
+		flagS = lipgloss.NewStyle().Foreground(colorDateCol).Bold(true).Render(flag)
+	case unread:
+		flagS = lipgloss.NewStyle().Foreground(colorAuthorUnread).Bold(true).Render(flag)
+	default:
+		flagS = lipgloss.NewStyle().Foreground(colorMuted).Render(flag)
+	}
+	dateS := lipgloss.NewStyle().Foreground(colorDateCol).Render(dateStr)
+
+	fromStyle := lipgloss.NewStyle().Foreground(colorAuthorRead)
+	subStyle := lipgloss.NewStyle().Foreground(colorSubjectRead)
+	if unread {
+		fromStyle = lipgloss.NewStyle().Foreground(colorAuthorUnread).Bold(true)
+		subStyle = lipgloss.NewStyle().Foreground(colorSubjectUnread).Bold(true)
+	}
+	fromS := fromStyle.Render(fmt.Sprintf("%-*s", fromMax, from))
+	subS := subStyle.Render(fmt.Sprintf("%-*s", subjectMax, subject))
+	sizeS := lipgloss.NewStyle().Foreground(colorSizeCol).Render(sizeStr)
+
+	fmt.Fprint(w, numS+flagS+dateS+fromS+"  "+subS+"  "+sizeS)
+}
+
+// cleanFrom strips the <addr> part when a display name is present.
+func cleanFrom(from string) string {
+	if i := strings.Index(from, " <"); i > 0 {
+		return from[:i]
+	}
+	return from
+}
+
+// fmtSize formats a byte count into a compact "(38.2K)" string like neomutt.
+func fmtSize(b uint32) string {
+	switch {
+	case b == 0:
+		return "       "
+	case b < 1024:
+		return fmt.Sprintf("(%4dB)", b)
+	case b < 1024*1024:
+		return fmt.Sprintf("(%4.0fK)", float64(b)/1024)
+	default:
+		return fmt.Sprintf("(%4.1fM)", float64(b)/(1024*1024))
+	}
 }
 
 func fmtDate(t time.Time) string {
 	if t.IsZero() {
-		return "—"
+		return "      "
 	}
 	now := time.Now()
 	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
-		return t.Format("15:04")
+		return t.Format("15:04 ")
 	}
 	if t.Year() == now.Year() {
 		return t.Format("Jan 02")
 	}
-	return t.Format("2006")
+	return t.Format("Jan 06")
 }
 
 func truncate(s string, max int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= max {
+	if max <= 0 {
+		return ""
+	}
+	// Count runes not bytes for proper unicode truncation
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
 	if max <= 1 {
 		return "…"
 	}
-	return s[:max-1] + "…"
+	return string(runes[:max-1]) + "…"
 }
 
 // newInboxList creates a bubbles/list configured for the email inbox.
@@ -121,11 +181,11 @@ func newInboxList(width, height int) list.Model {
 	return l
 }
 
-// setEmails replaces the list contents.
-func setEmails(l *list.Model, emails []imap.Email) tea.Cmd {
+// setEmails replaces the list contents, preserving marked state.
+func setEmails(l *list.Model, emails []imap.Email, marked map[uint32]bool) tea.Cmd {
 	items := make([]list.Item, len(emails))
 	for i, e := range emails {
-		items[i] = emailItem{email: e}
+		items[i] = emailItem{email: e, index: i + 1, marked: marked[e.UID]}
 	}
 	return l.SetItems(items)
 }

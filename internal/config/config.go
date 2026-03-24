@@ -39,6 +39,10 @@ type FoldersConfig struct {
 	Feed        string `toml:"feed"`
 	PaperTrail  string `toml:"papertrail"`
 	ScreenedOut string `toml:"screened_out"`
+	Archive     string `toml:"archive"`
+	Waiting     string `toml:"waiting"`
+	Scheduled   string `toml:"scheduled"`
+	Someday     string `toml:"someday"`
 }
 
 // UIConfig holds display preferences.
@@ -49,10 +53,26 @@ type UIConfig struct {
 
 // Config is the root neomd configuration.
 type Config struct {
-	Account  AccountConfig  `toml:"account"`
+	// Accounts is the list of email accounts (use [[accounts]] in config.toml).
+	// For a single account the legacy [account] block is also accepted.
+	Accounts []AccountConfig `toml:"accounts"`
+	Account  AccountConfig   `toml:"account"` // legacy single-account fallback
+
 	Screener ScreenerConfig `toml:"screener"`
 	Folders  FoldersConfig  `toml:"folders"`
 	UI       UIConfig       `toml:"ui"`
+}
+
+// ActiveAccounts returns the list of configured accounts.
+// Falls back to the legacy single [account] block if [[accounts]] is empty.
+func (c *Config) ActiveAccounts() []AccountConfig {
+	if len(c.Accounts) > 0 {
+		return c.Accounts
+	}
+	if c.Account.User != "" {
+		return []AccountConfig{c.Account}
+	}
+	return nil
 }
 
 // DefaultPath returns ~/.config/neomd/config.toml.
@@ -94,10 +114,12 @@ func defaults() *Config {
 	home, _ := os.UserHomeDir()
 	muttDir := filepath.Join(home, ".config", "mutt")
 	return &Config{
-		Account: AccountConfig{
-			Name: "Personal",
-			IMAP: "imap.example.com:993",
-			SMTP: "smtp.example.com:587",
+		Accounts: []AccountConfig{
+			{
+				Name: "Personal",
+				IMAP: "imap.example.com:993",
+				SMTP: "smtp.example.com:587",
+			},
 		},
 		Screener: ScreenerConfig{
 			ScreenedIn:  filepath.Join(muttDir, "screened_in.txt"),
@@ -114,6 +136,10 @@ func defaults() *Config {
 			Feed:        "Feed",
 			PaperTrail:  "PaperTrail",
 			ScreenedOut: "ScreenedOut",
+			Archive:     "Archive",
+			Waiting:     "Waiting",
+			Scheduled:   "Scheduled",
+			Someday:     "Someday",
 		},
 		UI: UIConfig{
 			Theme:      "dark",

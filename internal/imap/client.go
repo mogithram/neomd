@@ -29,6 +29,7 @@ type Email struct {
 	Date    time.Time
 	Seen    bool
 	Folder  string
+	Size    uint32 // RFC822 size in bytes
 }
 
 // Config holds connection parameters.
@@ -179,9 +180,10 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 		}
 
 		msgs, err := conn.Fetch(fetchSet, &imap.FetchOptions{
-			UID:      true,
-			Flags:    true,
-			Envelope: true,
+			UID:        true,
+			Flags:      true,
+			Envelope:   true,
+			RFC822Size: true,
 		}).Collect()
 		if err != nil {
 			return fmt.Errorf("FETCH headers: %w", err)
@@ -218,6 +220,7 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 					e.To = m.Envelope.To[0].Addr()
 				}
 			}
+			e.Size = uint32(m.RFC822Size)
 			emails = append(emails, e)
 		}
 		return nil
@@ -258,7 +261,10 @@ func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (stri
 	return body, err
 }
 
-// MoveMessage copies uid from src to dst, then deletes it from src.
+// MoveMessage moves uid from src to dst using the IMAP MOVE command (RFC 6851).
+// Falls back to COPY + STORE \Deleted + UID EXPUNGE on servers without MOVE.
+// Uses UID EXPUNGE (not plain EXPUNGE) in the fallback to avoid accidentally
+// expunging messages marked \Deleted by other concurrent clients.
 func (c *Client) MoveMessage(ctx context.Context, src string, uid uint32, dst string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -267,26 +273,12 @@ func (c *Client) MoveMessage(ctx context.Context, src string, uid uint32, dst st
 		if err := c.selectMailbox(src); err != nil {
 			return err
 		}
-
 		var uidSet imap.UIDSet
 		uidSet.AddNum(imap.UID(uid))
-
-		if _, err := conn.Copy(uidSet, dst).Wait(); err != nil {
-			return fmt.Errorf("COPY to %s: %w", dst, err)
+		if _, err := conn.Move(uidSet, dst).Wait(); err != nil {
+			return fmt.Errorf("MOVE %d → %s: %w", uid, dst, err)
 		}
-
-		if err := conn.Store(uidSet, &imap.StoreFlags{
-			Op:     imap.StoreFlagsAdd,
-			Silent: true,
-			Flags:  []imap.Flag{imap.FlagDeleted},
-		}, nil).Close(); err != nil {
-			return fmt.Errorf("STORE \\Deleted: %w", err)
-		}
-
-		if err := conn.Expunge().Close(); err != nil {
-			return fmt.Errorf("EXPUNGE: %w", err)
-		}
-		c.selectedMailbox = "" // state changed after EXPUNGE
+		c.selectedMailbox = "" // mailbox state changes after move
 		return nil
 	})
 }
@@ -304,6 +296,24 @@ func (c *Client) MarkSeen(ctx context.Context, folder string, uid uint32) error 
 		uidSet.AddNum(imap.UID(uid))
 		return conn.Store(uidSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsAdd,
+			Flags: []imap.Flag{imap.FlagSeen},
+		}, nil).Close()
+	})
+}
+
+// MarkUnseen removes the \Seen flag, marking a message as unread.
+func (c *Client) MarkUnseen(ctx context.Context, folder string, uid uint32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.withConn(ctx, func(conn *imapclient.Client) error {
+		if err := c.selectMailbox(folder); err != nil {
+			return err
+		}
+		var uidSet imap.UIDSet
+		uidSet.AddNum(imap.UID(uid))
+		return conn.Store(uidSet, &imap.StoreFlags{
+			Op:    imap.StoreFlagsDel,
 			Flags: []imap.Flag{imap.FlagSeen},
 		}, nil).Close()
 	})

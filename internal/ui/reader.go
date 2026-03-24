@@ -50,13 +50,14 @@ func renderEmailHeader(e *imap.Email, width int) string {
 
 // readerHelp returns the one-line help string for the reader view.
 func readerHelp() string {
-	keys := []string{"j/k scroll", "space page", "q back"}
+	keys := []string{"j/k scroll", "space/d page", "h/q back", "r reply", "O open in browser", "? help"}
 	return styleHelp.Render("  " + strings.Join(keys, " · "))
 }
 
 // inboxHelp returns the one-line help string for the inbox view.
 func inboxHelp(folder string) string {
-	base := []string{"enter open", "c compose", "/ filter", "tab switch folder", "q quit"}
+	base := []string{"enter/l open", "r reply", "c compose", "I/O/F/P/A screen", "g goto", "M move", "/ filter", "R reload", "? help", "q quit"}
+	_ = folder
 	if folder == "ToScreen" {
 		base = []string{"I approve", "O block", "F feed", "P papertrail", "q back"}
 	}

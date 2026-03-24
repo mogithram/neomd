@@ -2,16 +2,37 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
+// Kanagawa palette — https://github.com/rebelot/kanagawa.nvim
 var (
-	colorPrimary  = lipgloss.Color("#ff5d62") // warm red, from newsletter theme
-	colorMuted    = lipgloss.Color("#6c7086")
-	colorSubtle   = lipgloss.Color("#313244")
-	colorText     = lipgloss.Color("#cdd6f4")
-	colorUnread   = lipgloss.Color("#cba6f7") // lavender for unread
-	colorBg       = lipgloss.Color("#1e1e2e")
-	colorBorder   = lipgloss.Color("#45475a")
-	colorSelected = lipgloss.Color("#585b70")
+	// ── Base chrome ─────────────────────────────────────────────────────────
+	colorBg       = lipgloss.Color("#1F1F28") // sumiInk1  — default background
+	colorBorder   = lipgloss.Color("#54546D") // sumiInk4  — borders, float edges
+	colorSubtle   = lipgloss.Color("#363646") // sumiInk3  — cursorline
+	colorSelected = lipgloss.Color("#223249") // waveBlue1 — visual selection
+	colorText     = lipgloss.Color("#DCD7BA") // fujiWhite — default foreground
+	colorMuted    = lipgloss.Color("#727169") // fujiGray  — comments, dim text
 
+	// ── Primary accent (header, active tab) ─────────────────────────────────
+	colorPrimary = lipgloss.Color("#7E9CD8") // crystalBlue — functions & titles
+
+	// ── Unread indicator ────────────────────────────────────────────────────
+	colorUnread = lipgloss.Color("#957FB8") // oniViolet — statements & keywords
+
+	// ── Index column colours ────────────────────────────────────────────────
+	colorNumber        = lipgloss.Color("#7E9CD8") // crystalBlue  — row number
+	colorDateCol       = lipgloss.Color("#E6C384") // carpYellow   — date
+	colorAuthorRead    = lipgloss.Color("#E46876") // waveRed      — sender (read)
+	colorSubjectRead   = lipgloss.Color("#7AA89F") // waveAqua2    — subject (read)
+	colorSizeCol       = lipgloss.Color("#727169") // fujiGray     — size
+	colorAuthorUnread  = lipgloss.Color("#DCA561") // autumnYellow — sender (unread, warm standout)
+	colorSubjectUnread = lipgloss.Color("#7FB4CA") // springBlue   — subject (unread)
+
+	// ── Status colours ──────────────────────────────────────────────────────
+	colorError   = lipgloss.Color("#C34043") // autumnRed
+	colorSuccess = lipgloss.Color("#98BB6C") // springGreen
+)
+
+var (
 	styleHeader = lipgloss.NewStyle().
 			Foreground(colorPrimary).
 			Bold(true).
@@ -26,7 +47,7 @@ var (
 			Padding(0, 1)
 
 	styleError = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f38ba8")).
+			Foreground(colorError).
 			Padding(0, 1)
 
 	styleEmailMeta = lipgloss.NewStyle().
@@ -73,7 +94,7 @@ var (
 			Foreground(colorText)
 
 	styleSuccess = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#a6e3a1"))
+			Foreground(colorSuccess)
 )
 
 // folderTabs renders the folder switcher bar.
