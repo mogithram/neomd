@@ -47,7 +47,7 @@ password = "app-password"
 from     = "Me <me@example.com>"
 
 # Multiple accounts supported — add more [[accounts]] blocks
-# Switch between them with `a` in the inbox
+# Switch between them with `ctrl+a` in the inbox
 
 [screener]
 # reuse your existing neomutt allowlist files
@@ -153,7 +153,7 @@ All screener and move actions below apply to **all marked emails**, or just the 
 | `c` | Compose new email |
 | `e` | Open in `$EDITOR` (read-only) — search, copy, vim motions (from reader) |
 | `O` | Open in browser — `$BROWSER` or `w3m` (from reader) |
-| `a` | Switch account (if multiple configured) |
+| `ctrl+a` | Switch account (if multiple configured) |
 | `/` | Filter emails |
 | `q` | Quit |
 
@@ -166,6 +166,54 @@ All screener and move actions below apply to **all marked emails**, or just the 
 | `esc` | Cancel |
 
 After saving and closing the editor, the email is sent automatically.
+
+## Screener Workflow
+
+The screener classifies senders into four buckets using plain-text allowlists. Unknown senders land in `ToScreen` until you make a decision.
+
+### How classification works
+
+| List file | Category | Where email lands |
+|-----------|----------|-------------------|
+| `screened_in.txt` | Approved | stays in Inbox |
+| `screened_out.txt` | Blocked | ScreenedOut |
+| `feed.txt` | Newsletter / feed | Feed |
+| `papertrail.txt` | Receipts / notifications | PaperTrail |
+| *(not in any list)* | Unknown | ToScreen |
+
+### Day-to-day: screen new arrivals
+
+Press `S` (or run `:screen`) to dry-run the screener against the emails currently loaded in your Inbox. A preview shows what would move where — press `y` to apply, `n` to cancel.
+
+For individual senders, use `I` / `O` / `F` / `P` from any folder or the ToScreen queue.
+
+### Bulk re-classification after updating your lists
+
+When you add many senders to `feed.txt` or `papertrail.txt` at once (e.g. after importing from HEY), use this workflow:
+
+```
+1. Edit feed.txt / papertrail.txt / screened_in.txt with the new senders
+2. Restart neomd  (lists are loaded at startup)
+3. :reset-toscreen   →  shows "Move N emails from ToScreen → Inbox? y/n"
+                         (moves everything back so it can be re-classified)
+4. y to confirm
+5. :screen-all       →  dry-run against ALL inbox emails (not just the loaded subset)
+6. y to apply
+```
+
+`:screen-all` (alias `:sa`) scans every email in your Inbox — read and unread — and proposes moves for any sender that is now in a list. It does **not** touch emails already in Feed, PaperTrail, or other folders.
+
+### Colon commands
+
+Press `:` to open the command line. Tab cycles through completions; Enter runs the command.
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `:screen` | `:s` | dry-run screen currently loaded Inbox emails |
+| `:screen-all` | `:sa` | dry-run screen **every** Inbox email (no count limit) |
+| `:reset-toscreen` | `:rts` | move all ToScreen emails back to Inbox |
+| `:reload` | `:r` | reload the current folder |
+| `:quit` | `:q` | quit neomd |
 
 ## How Sending Works
 

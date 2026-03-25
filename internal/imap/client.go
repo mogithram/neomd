@@ -167,8 +167,9 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 		}
 
 		// Take the last n UIDs (most recent) and reverse to newest-first.
+		// n=0 means no limit — fetch all.
 		sort.Slice(allUIDs, func(i, j int) bool { return allUIDs[i] < allUIDs[j] })
-		if len(allUIDs) > n {
+		if n > 0 && len(allUIDs) > n {
 			allUIDs = allUIDs[len(allUIDs)-n:]
 		}
 		for i, j := 0, len(allUIDs)-1; i < j; i, j = i+1, j-1 {
@@ -222,6 +223,110 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 				}
 			}
 			e.Size = uint32(m.RFC822Size)
+			emails = append(emails, e)
+		}
+		return nil
+	})
+	return emails, err
+}
+
+// SearchUIDs returns all UIDs in folder without fetching any headers.
+// Very fast — a single IMAP UID SEARCH ALL command regardless of mailbox size.
+func (c *Client) SearchUIDs(ctx context.Context, folder string) ([]uint32, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var uids []uint32
+	err := c.withConn(ctx, func(conn *imapclient.Client) error {
+		if err := c.selectMailbox(folder); err != nil {
+			return err
+		}
+		searchData, err := conn.UIDSearch(&imap.SearchCriteria{}, nil).Wait()
+		if err != nil {
+			return fmt.Errorf("UID SEARCH: %w", err)
+		}
+		uidSet, ok := searchData.All.(imap.UIDSet)
+		if !ok {
+			return nil
+		}
+		nums, _ := uidSet.Nums()
+		for _, u := range nums {
+			uids = append(uids, uint32(u))
+		}
+		return nil
+	})
+	return uids, err
+}
+
+// FetchUnseenCounts returns the number of unseen messages for each folder using
+// IMAP STATUS — fast and does not SELECT/open the mailbox.
+// folders maps a display label (e.g. "Inbox") to an IMAP mailbox name.
+// Missing or inaccessible mailboxes are skipped silently.
+func (c *Client) FetchUnseenCounts(ctx context.Context, folders map[string]string) (map[string]int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	counts := make(map[string]int, len(folders))
+	err := c.withConn(ctx, func(conn *imapclient.Client) error {
+		for label, mailbox := range folders {
+			data, err := conn.Status(mailbox, &imap.StatusOptions{NumUnseen: true}).Wait()
+			if err != nil {
+				continue // folder may not exist; skip
+			}
+			if data.NumUnseen != nil {
+				counts[label] = int(*data.NumUnseen)
+			}
+		}
+		return nil
+	})
+	return counts, err
+}
+
+// FetchHeadersByUID fetches envelope headers for a specific slice of UIDs.
+// Callers should pass small batches (≤200) to avoid oversized IMAP requests.
+func (c *Client) FetchHeadersByUID(ctx context.Context, folder string, uids []uint32) ([]Email, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(uids) == 0 {
+		return nil, nil
+	}
+	var emails []Email
+	err := c.withConn(ctx, func(conn *imapclient.Client) error {
+		if err := c.selectMailbox(folder); err != nil {
+			return err
+		}
+		var fetchSet imap.UIDSet
+		for _, uid := range uids {
+			fetchSet.AddNum(imap.UID(uid))
+		}
+		msgs, err := conn.Fetch(fetchSet, &imap.FetchOptions{
+			UID:      true,
+			Flags:    true,
+			Envelope: true,
+		}).Collect()
+		if err != nil {
+			return fmt.Errorf("FETCH headers: %w", err)
+		}
+		for _, m := range msgs {
+			e := Email{UID: uint32(m.UID), Folder: folder}
+			for _, f := range m.Flags {
+				if f == imap.FlagSeen {
+					e.Seen = true
+				}
+			}
+			if m.Envelope != nil {
+				e.Subject = m.Envelope.Subject
+				e.Date = m.Envelope.Date
+				if len(m.Envelope.From) > 0 {
+					a := m.Envelope.From[0]
+					if a.Name != "" {
+						e.From = a.Name + " <" + a.Addr() + ">"
+					} else {
+						e.From = a.Addr()
+					}
+				}
+			}
 			emails = append(emails, e)
 		}
 		return nil

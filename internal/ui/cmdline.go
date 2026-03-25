@@ -1,0 +1,177 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// neomdCmd is a registered colon-command (like vim's :command).
+type neomdCmd struct {
+	name    string // full name, e.g. "screen-all"
+	aliases []string // short forms accepted, e.g. ["sa", "screen-a"]
+	desc    string
+	// run is called when the command is executed; m is the current model.
+	run func(m *Model) (tea.Model, tea.Cmd)
+}
+
+// cmdRegistry is the list of all available colon-commands.
+// Add new commands here — they become automatically available in the
+// command line with tab-completion.
+var cmdRegistry []neomdCmd
+
+func init() {
+	cmdRegistry = []neomdCmd{
+		{
+			name:    "screen",
+			aliases: []string{"s"},
+			desc:    "screen currently loaded emails only (up to inbox_count)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				moves := m.previewAutoScreen()
+				if len(moves) == 0 {
+					m.status = "Nothing to screen — all senders already classified."
+					return m, nil
+				}
+				m.pendingMoves = moves
+				m.status = screenSummary(moves) + "  · y to apply, n to cancel"
+				return m, nil
+			},
+		},
+		{
+			name:    "screen-all",
+			aliases: []string{"sa", "screen-a"},
+			desc:    "fetch and screen EVERY inbox email, no limit (use after updating screener lists)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, m.deepScreenCmd()
+			},
+		},
+		{
+			name:    "reload",
+			aliases: []string{"r", "re"},
+			desc:    "reload / refresh the current folder",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, m.fetchFolderCmd(m.activeFolder())
+			},
+		},
+		{
+			name:    "reset-toscreen",
+			aliases: []string{"rts"},
+			desc:    "move all ToScreen emails back to Inbox (then run screen-all to reclassify)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.resetToScreenSearchCmd())
+			},
+		},
+		{
+			name:    "quit",
+			aliases: []string{"q"},
+			desc:    "quit neomd",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				return m, tea.Quit
+			},
+		},
+	}
+}
+
+// screenSummary builds the "N→Folder …" part of the S/screen-all preview.
+func screenSummary(moves []autoScreenMove) string {
+	counts := map[string]int{}
+	for _, mv := range moves {
+		counts[mv.dst]++
+	}
+	s := ""
+	for dst, n := range counts {
+		s += " " + formatInt(n) + "→" + dst
+	}
+	return "Would move " + formatInt(len(moves)) + " email(s):" + s
+}
+
+func formatInt(n int) string { return fmt.Sprintf("%d", n) }
+
+// matchCmds returns all commands whose name or any alias has text as a prefix.
+// When text is empty, all commands are returned (for tab-cycling).
+func matchCmds(text string) []*neomdCmd {
+	lower := strings.ToLower(text)
+	var out []*neomdCmd
+	for i := range cmdRegistry {
+		c := &cmdRegistry[i]
+		if lower == "" || strings.HasPrefix(c.name, lower) {
+			out = append(out, c)
+			continue
+		}
+		for _, a := range c.aliases {
+			if strings.HasPrefix(a, lower) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// matchCmd returns the first matching command (for enter / ghost completion).
+func matchCmd(text string) *neomdCmd {
+	if text == "" {
+		return nil
+	}
+	if m := matchCmds(text); len(m) > 0 {
+		return m[0]
+	}
+	return nil
+}
+
+// viewCmdLine renders the command-line bar shown at the bottom of the inbox.
+// When input is empty or has multiple matches it shows a tab-cycle menu above.
+func viewCmdLine(text string, width int) string {
+	matches := matchCmds(text)
+	first := matchCmd(text) // nil when empty
+
+	prefix := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(":")
+	inputS := lipgloss.NewStyle().Foreground(colorText).Render(text)
+
+	// Ghost completion: rest of first matched name
+	ghost := ""
+	if first != nil && text != "" {
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(first.name, lower) && len(first.name) > len(lower) {
+			ghost = lipgloss.NewStyle().Foreground(colorMuted).Render(first.name[len(lower):])
+		}
+	}
+
+	cursor := lipgloss.NewStyle().Foreground(colorPrimary).Render("█")
+
+	// Inline description / error
+	desc := ""
+	if first != nil {
+		desc = lipgloss.NewStyle().Foreground(colorMuted).Render("   — " + first.desc)
+	} else if text != "" {
+		desc = lipgloss.NewStyle().Foreground(colorError).Render("   unknown command")
+	}
+
+	cmdLine := "  " + prefix + inputS + ghost + cursor + desc
+
+	// When empty or multiple matches: show a compact menu above the command line
+	// so the user can see what's available and tab-cycle through them.
+	if len(matches) > 1 || text == "" {
+		nameStyle := lipgloss.NewStyle().Foreground(colorPrimary)
+		dimStyle := lipgloss.NewStyle().Foreground(colorMuted)
+		var parts []string
+		for _, c := range matches {
+			entry := nameStyle.Render(c.name)
+			if len(c.aliases) > 0 {
+				entry += dimStyle.Render(" (" + strings.Join(c.aliases, ",") + ")")
+			}
+			parts = append(parts, entry)
+		}
+		hint := dimStyle.Render("tab to cycle · enter to run · esc cancel")
+		menu := "  " + strings.Join(parts, dimStyle.Render("  ·  ")) + "    " + hint
+		return menu + "\n" + cmdLine
+	}
+
+	_ = width
+	return cmdLine
+}

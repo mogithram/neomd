@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Kanagawa palette — https://github.com/rebelot/kanagawa.nvim
 var (
@@ -98,13 +102,17 @@ var (
 )
 
 // folderTabs renders the folder switcher bar.
-func folderTabs(folders []string, active string) string {
+func folderTabs(folders []string, active string, counts map[string]int) string {
 	var tabs []string
 	for _, f := range folders {
+		label := f
+		if n, ok := counts[f]; ok && n > 0 {
+			label = fmt.Sprintf("%s (%d)", f, n)
+		}
 		if f == active {
-			tabs = append(tabs, styleHeader.Render(f))
+			tabs = append(tabs, styleHeader.Render(label))
 		} else {
-			tabs = append(tabs, styleFolder.Render(f))
+			tabs = append(tabs, styleFolder.Render(label))
 		}
 	}
 	sep := styleSeparator.Render(" │ ")

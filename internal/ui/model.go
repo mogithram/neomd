@@ -42,7 +42,26 @@ type (
 	}
 	sendDoneMsg       struct{ err error }
 	screenDoneMsg     struct{ err error }
-	autoScreenDoneMsg struct{ moved int; err error }
+	autoScreenDoneMsg   struct{ moved int; err error }
+	deepScreenReadyMsg  struct {
+		moves []autoScreenMove
+		total int
+	}
+	// deepScreenCountMsg is returned by phase-1: UID SEARCH finished, total known.
+	deepScreenCountMsg struct {
+		uids  []uint32
+		total int
+	}
+	// deepScreenBatchMsg carries accumulated results between batches.
+	deepScreenBatchMsg struct {
+		emails    []imap.Email // accumulated so far
+		remaining []uint32     // UIDs not yet fetched
+		total     int
+	}
+	// resetToScreenReadyMsg is returned once we know how many emails are in ToScreen.
+	resetToScreenReadyMsg struct{ uids []uint32 }
+	// folderCountsMsg carries unseen counts for watched folder tabs.
+	folderCountsMsg struct{ counts map[string]int }
 	moveDoneMsg       struct{ err error }
 	batchDoneMsg      struct{ err error }
 	toggleSeenDoneMsg struct{ uid uint32; seen bool; err error }
@@ -107,6 +126,25 @@ type Model struct {
 
 	// helpSearch is the live filter string typed in the help overlay
 	helpSearch string
+
+	// cmdMode / cmdText / cmdTabI implement vim-style ":" command line.
+	cmdMode bool
+	cmdText string
+	cmdTabI int // cycle index for tab-completion
+
+	// filterActive / filterText implement our own inbox search.
+	// We bypass bubbles/list's built-in filter because SetShowTitle(false)
+	// hides the filter input. filterActive is true while the user is typing.
+	filterActive bool
+	filterText   string
+
+	// pendingResetUIDs holds ToScreen UIDs awaiting y/n confirmation before
+	// being bulk-moved back to Inbox.
+	pendingResetUIDs []uint32
+
+	// folderCounts holds unseen message counts for watched folder tabs.
+	// Keys are tab labels: "Inbox", "PaperTrail", "Waiting", "Scheduled".
+	folderCounts map[string]int
 }
 
 // New creates and initialises the TUI model.
@@ -369,6 +407,84 @@ func (m Model) previewAutoScreen() []autoScreenMove {
 	return moves
 }
 
+// deepScreenCmd is phase 1: just UID SEARCH — fast regardless of mailbox size.
+// Returns deepScreenCountMsg so the UI can show the total before phase 2 starts.
+func (m Model) deepScreenCmd() tea.Cmd {
+	inboxFolder := m.cfg.Folders.Inbox
+	return func() tea.Msg {
+		uids, err := m.imapCli().SearchUIDs(nil, inboxFolder)
+		if err != nil {
+			return errMsg{err}
+		}
+		return deepScreenCountMsg{uids: uids, total: len(uids)}
+	}
+}
+
+// deepScreenClassifyCmd is phase 2: fetch ONE batch of UIDs (1000 at a time)
+// and return deepScreenBatchMsg so the UI can show per-batch progress.
+// accumulated holds headers already fetched in prior batches.
+func (m Model) deepScreenClassifyCmd(accumulated []imap.Email, remaining []uint32, total int) tea.Cmd {
+	inboxFolder := m.cfg.Folders.Inbox
+	const batchSize = 1000
+	return func() tea.Msg {
+		end := batchSize
+		if end > len(remaining) {
+			end = len(remaining)
+		}
+		batch, err := m.imapCli().FetchHeadersByUID(nil, inboxFolder, remaining[:end])
+		if err != nil {
+			return errMsg{err}
+		}
+		return deepScreenBatchMsg{
+			emails:    append(accumulated, batch...),
+			remaining: remaining[end:],
+			total:     total,
+		}
+	}
+}
+
+// resetToScreenSearchCmd is phase 1: just count UIDs in ToScreen so we can
+// show the user a confirmation before moving anything.
+func (m Model) resetToScreenSearchCmd() tea.Cmd {
+	folder := m.cfg.Folders.ToScreen
+	return func() tea.Msg {
+		uids, err := m.imapCli().SearchUIDs(nil, folder)
+		if err != nil {
+			return errMsg{err}
+		}
+		return resetToScreenReadyMsg{uids: uids}
+	}
+}
+
+// resetToScreenMoveCmd bulk-moves all given UIDs from ToScreen back to Inbox.
+func (m Model) resetToScreenMoveCmd(uids []uint32) tea.Cmd {
+	src := m.cfg.Folders.ToScreen
+	dst := m.cfg.Folders.Inbox
+	return func() tea.Msg {
+		for i, uid := range uids {
+			if err := m.imapCli().MoveMessage(nil, src, uid, dst); err != nil {
+				return batchDoneMsg{fmt.Errorf("stopped after %d/%d: %w", i, len(uids), err)}
+			}
+		}
+		return batchDoneMsg{}
+	}
+}
+
+// fetchFolderCountsCmd fetches unseen counts for the four watched tabs in the
+// background using IMAP STATUS (no SELECT, very fast).
+func (m Model) fetchFolderCountsCmd() tea.Cmd {
+	folders := map[string]string{
+		"Inbox":      m.cfg.Folders.Inbox,
+		"PaperTrail": m.cfg.Folders.PaperTrail,
+		"Waiting":    m.cfg.Folders.Waiting,
+		"Scheduled":  m.cfg.Folders.Scheduled,
+	}
+	return func() tea.Msg {
+		counts, _ := m.imapCli().FetchUnseenCounts(nil, folders)
+		return folderCountsMsg{counts: counts}
+	}
+}
+
 // execAutoScreenCmd performs the IMAP moves for a pre-approved list of moves.
 func (m Model) execAutoScreenCmd(moves []autoScreenMove) tea.Cmd {
 	src := m.cfg.Folders.Inbox
@@ -442,8 +558,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.emails = msg.emails
 		m.markedUIDs = make(map[uint32]bool) // clear marks on folder reload
+		m.filterActive = false
+		m.filterText = ""
 		cmd := setEmails(&m.inbox, msg.emails, m.markedUIDs)
-		return m, cmd
+		return m, tea.Batch(cmd, m.fetchFolderCountsCmd())
+
+	case folderCountsMsg:
+		m.folderCounts = msg.counts
+		return m, nil
 
 	case bodyLoadedMsg:
 		m.loading = false
@@ -520,6 +642,87 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
+	case deepScreenCountMsg:
+		// Phase 1 done: we know how many emails exist. Show count and kick off phase 2.
+		m.status = fmt.Sprintf("Screen-all: found %d emails — fetching headers in batches…", msg.total)
+		return m, tea.Batch(m.spinner.Tick, m.deepScreenClassifyCmd(nil, msg.uids, msg.total))
+
+	case deepScreenBatchMsg:
+		// One batch done — show progress, kick off next batch or classify.
+		fetched := len(msg.emails)
+		if len(msg.remaining) > 0 {
+			m.status = fmt.Sprintf("Screen-all: fetched %d/%d emails…", fetched, msg.total)
+			return m, tea.Batch(m.spinner.Tick, m.deepScreenClassifyCmd(msg.emails, msg.remaining, msg.total))
+		}
+		// All batches done — classify in-memory (O(1) map lookups).
+		inboxFolder := m.cfg.Folders.Inbox
+		var moves []autoScreenMove
+		for i := range msg.emails {
+			e := &msg.emails[i]
+			cat := m.screener.Classify(e.From)
+			var dst string
+			switch cat {
+			case screener.CategoryScreenedOut:
+				dst = m.cfg.Folders.ScreenedOut
+			case screener.CategoryFeed:
+				dst = m.cfg.Folders.Feed
+			case screener.CategoryPaperTrail:
+				dst = m.cfg.Folders.PaperTrail
+			case screener.CategoryToScreen:
+				dst = m.cfg.Folders.ToScreen
+			}
+			if dst != "" && dst != inboxFolder {
+				moves = append(moves, autoScreenMove{email: e, dst: dst})
+			}
+		}
+		m.loading = false
+		if len(moves) == 0 {
+			m.status = fmt.Sprintf("Screen-all: all %d inbox emails already classified.", msg.total)
+			return m, nil
+		}
+		counts := map[string]int{}
+		for _, mv := range moves {
+			counts[mv.dst]++
+		}
+		summary := fmt.Sprintf("Screen-all: %d/%d email(s) to move:", len(moves), msg.total)
+		for dst, n := range counts {
+			summary += fmt.Sprintf(" %d→%s", n, dst)
+		}
+		summary += "  · y to apply, n to cancel"
+		m.pendingMoves = moves
+		m.status = summary
+		return m, nil
+
+	case deepScreenReadyMsg:
+		m.loading = false
+		if len(msg.moves) == 0 {
+			m.status = fmt.Sprintf("Deep screen: all %d inbox emails already classified.", msg.total)
+			return m, nil
+		}
+		counts := map[string]int{}
+		for _, mv := range msg.moves {
+			counts[mv.dst]++
+		}
+		summary := fmt.Sprintf("Deep screen %d/%d email(s):", len(msg.moves), msg.total)
+		for dst, n := range counts {
+			summary += fmt.Sprintf(" %d→%s", n, dst)
+		}
+		summary += "  · y to apply, n to cancel"
+		m.pendingMoves = msg.moves
+		m.status = summary
+		return m, nil
+
+	case resetToScreenReadyMsg:
+		if len(msg.uids) == 0 {
+			m.loading = false
+			m.status = "ToScreen is already empty."
+			return m, nil
+		}
+		m.loading = false
+		m.pendingResetUIDs = msg.uids
+		m.status = fmt.Sprintf("Move %d email(s) from ToScreen → Inbox?  · y to apply, n to cancel", len(msg.uids))
+		return m, nil
+
 	case autoScreenDoneMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -582,6 +785,71 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// ── Vim-style ":" command line ──────────────────────────────────
+	if m.cmdMode {
+		switch key {
+		case "esc":
+			m.cmdMode = false
+			m.cmdText = ""
+		case "enter":
+			m.cmdMode = false
+			input := strings.TrimSpace(m.cmdText)
+			m.cmdText = ""
+			if cmd := matchCmd(input); cmd != nil {
+				result, c := cmd.run(&m)
+				return result, c
+			}
+			if input != "" {
+				m.status = "Unknown command: " + input
+				m.isError = true
+			}
+		case "backspace", "ctrl+h":
+			runes := []rune(m.cmdText)
+			if len(runes) > 0 {
+				m.cmdText = string(runes[:len(runes)-1])
+			}
+			m.cmdTabI = 0
+		case "tab":
+			matches := matchCmds(m.cmdText)
+			if len(matches) > 0 {
+				m.cmdText = matches[m.cmdTabI%len(matches)].name
+				m.cmdTabI++
+			}
+		default:
+			if len(key) == 1 {
+				m.cmdText += key
+				m.cmdTabI = 0 // reset cycle on new input
+			}
+		}
+		return m, nil
+	}
+
+	// ── Our own filter mode ─────────────────────────────────────────
+	// When active, consume all keys for text input; no inbox commands fire.
+	if m.filterActive {
+		switch key {
+		case "esc":
+			m.filterActive = false
+			m.filterText = ""
+			return m, m.applyFilter()
+		case "enter":
+			m.filterActive = false // commit filter, keep results
+			return m, nil
+		case "backspace", "ctrl+h":
+			runes := []rune(m.filterText)
+			if len(runes) > 0 {
+				m.filterText = string(runes[:len(runes)-1])
+			}
+			return m, m.applyFilter()
+		default:
+			if len(key) == 1 {
+				m.filterText += key
+				return m, m.applyFilter()
+			}
+		}
+		return m, nil
+	}
+
 	// Handle pending chord prefix (g or M) — consume the second key
 	if m.pendingKey != "" {
 		prefix := m.pendingKey
@@ -591,9 +859,10 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleChord(prefix, key)
 	}
 
-	// Clear pending auto-screen dry-run on any key except y/n
-	if len(m.pendingMoves) > 0 && key != "y" && key != "n" {
+	// Clear pending confirmations on any key except y/n
+	if key != "y" && key != "n" {
 		m.pendingMoves = nil
+		m.pendingResetUIDs = nil
 	}
 	m.status = ""
 	m.isError = false
@@ -645,6 +914,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.batchMoveCmd(targets, m.cfg.Folders.Archive))
 
 	// ── Auto-screen dry-run (Inbox only) ────────────────────────────
+	case ":":
+		m.cmdMode = true
+		m.cmdText = ""
+		return m, nil
+
 	case "S":
 		if m.folders[m.activeFolderI] != "Inbox" {
 			break
@@ -668,6 +942,12 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "y":
+		if len(m.pendingResetUIDs) > 0 {
+			uids := m.pendingResetUIDs
+			m.pendingResetUIDs = nil
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.resetToScreenMoveCmd(uids))
+		}
 		if len(m.pendingMoves) == 0 {
 			break
 		}
@@ -677,7 +957,8 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.execAutoScreenCmd(moves))
 
 	case "n":
-		if len(m.pendingMoves) > 0 {
+		if len(m.pendingResetUIDs) > 0 || len(m.pendingMoves) > 0 {
+			m.pendingResetUIDs = nil
 			m.pendingMoves = nil
 			m.status = "Cancelled."
 			return m, nil
@@ -698,7 +979,12 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inbox.Select(len(m.inbox.Items()) - 1)
 		return m, nil
 
-	case "a":
+	case "/":
+		m.filterActive = true
+		m.filterText = ""
+		return m, m.applyFilter()
+
+	case "ctrl+a":
 		if len(m.clients) > 1 {
 			m.accountI = (m.accountI + 1) % len(m.clients)
 			m.activeFolderI = 0
@@ -760,6 +1046,23 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.inbox, cmd = m.inbox.Update(msg)
 	return m, cmd
+}
+
+// applyFilter filters m.emails by filterText and refreshes the list.
+// Call this whenever filterText changes.
+func (m *Model) applyFilter() tea.Cmd {
+	if m.filterText == "" {
+		return setEmails(&m.inbox, m.emails, m.markedUIDs)
+	}
+	query := strings.ToLower(m.filterText)
+	var filtered []imap.Email
+	for _, e := range m.emails {
+		hay := strings.ToLower(e.From + " " + e.Subject)
+		if strings.Contains(hay, query) {
+			filtered = append(filtered, e)
+		}
+	}
+	return setEmails(&m.inbox, filtered, m.markedUIDs)
 }
 
 // handleChord dispatches two-key sequences (g<x> and M<x>).
@@ -1019,7 +1322,7 @@ func (m Model) viewInbox() string {
 	var b strings.Builder
 
 	// Account indicator (only shown when more than one account configured)
-	header := folderTabs(m.folders, m.folders[m.activeFolderI])
+	header := folderTabs(m.folders, m.folders[m.activeFolderI], m.folderCounts)
 	if len(m.accounts) > 1 {
 		acct := styleDate.Render("  " + m.activeAccount().Name + " ·")
 		header = acct + "  " + header
@@ -1039,12 +1342,20 @@ func (m Model) viewInbox() string {
 	}
 
 	b.WriteString("\n")
-	if m.status != "" {
+	if m.cmdMode {
+		b.WriteString(viewCmdLine(m.cmdText, m.width))
+	} else if m.filterActive || m.filterText != "" {
+		cursor := ""
+		if m.filterActive {
+			cursor = "█"
+		}
+		b.WriteString(styleHelp.Render(fmt.Sprintf("  / %s%s  · enter confirm · esc clear", m.filterText, cursor)))
+	} else if m.status != "" {
 		b.WriteString(statusBar(m.status, m.isError))
 	} else {
 		help := inboxHelp(m.folders[m.activeFolderI])
 		if len(m.accounts) > 1 {
-			help += styleHelp.Render(" · a switch account")
+			help += styleHelp.Render(" · ctrl+a switch account")
 		}
 		b.WriteString(help)
 	}
@@ -1139,7 +1450,8 @@ func (m Model) viewHelp() string {
 			{"F", "mark as Feed  → feed.txt + move to Feed"},
 			{"P", "mark as PaperTrail → papertrail.txt + move to PaperTrail"},
 			{"A", "archive (move to Archive, no screener update)"},
-			{"S", "dry-run screen inbox (then y to apply, n to cancel)"},
+			{"S", "dry-run screen inbox (loaded emails, then y/n)"},
+		{"ctrl+s", "deep screen ALL inbox emails (fetch all, then y/n)"},
 		}},
 		{"Move  (marked or cursor, no screener update)", [][2]string{
 			{"x", "delete → Trash"},
@@ -1164,10 +1476,11 @@ func (m Model) viewHelp() string {
 			{"c", "compose new email"},
 			{"e  (reader)", "open in neovim -R (read, search, copy)"},
 			{"O  (reader)", "open in browser (w3m / $BROWSER)"},
-			{"a", "switch account  (if multiple configured)"},
+			{"ctrl+a", "switch account  (if multiple configured)"},
 		}},
 		{"General", [][2]string{
 			{"/", "filter emails"},
+			{":", "command line  (:screen  :screen-all  :reload  :quit + tab-complete)"},
 			{"?", "toggle this help"},
 			{"q", "quit  (from inbox)"},
 		}},

@@ -175,7 +175,7 @@ func newInboxList(width, height int) list.Model {
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
-	l.SetFilteringEnabled(true)
+	l.SetFilteringEnabled(false) // we manage filtering ourselves (filterText in Model)
 	l.DisableQuitKeybindings()
 	l.Styles.NoItems = styleStatus
 	return l
