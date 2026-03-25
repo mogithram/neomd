@@ -18,6 +18,9 @@ Reading an email with Markdown 💙:
 
 ![neomd](images/sent-email.png)
 
+Or in Gmail:
+![neomd](images/gmail.png)
+
 This is the markdown sent:
 
 ```markdown
