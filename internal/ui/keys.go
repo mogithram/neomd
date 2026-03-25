@@ -72,7 +72,9 @@ var HelpSections = []HelpSection{
 		{"r", "reply  (from reader)"},
 		{"c", "compose new email"},
 		{"e  (reader)", "open in $EDITOR read-only — search, copy, vim motions"},
-		{"O  (reader)", "open in browser — $BROWSER or w3m"},
+		{"o  (reader)", "open in w3m (terminal browser)"},
+		{"O  (reader)", "open in $BROWSER (GUI browser, images shown)"},
+		{"ctrl+o  (reader)", "open web version / newsletter URL in $BROWSER"},
 		{"ctrl+a", "switch account  (if multiple configured)"},
 	}},
 	{"Command line  (: to open, tab to complete)", [][2]string{

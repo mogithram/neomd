@@ -335,12 +335,15 @@ func (c *Client) FetchHeadersByUID(ctx context.Context, folder string, uids []ui
 	return emails, err
 }
 
-// FetchBody fetches and returns the plain-text body of a single message.
-func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (string, error) {
+// FetchBody fetches the body of a single message.
+// Returns (markdownBody, rawHTML, webURL, error).
+// rawHTML is the original HTML part (empty for plain-text emails).
+// webURL is the canonical "view online" URL (empty if not found).
+func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (string, string, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var body string
+	var markdown, rawHTML, webURL string
 	err := c.withConn(ctx, func(conn *imapclient.Client) error {
 		if err := c.selectMailbox(folder); err != nil {
 			return err
@@ -361,11 +364,11 @@ func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (stri
 		}
 
 		if len(msgs[0].BodySection) > 0 {
-			body = parsePlainText(msgs[0].BodySection[0].Bytes)
+			markdown, rawHTML, webURL = parseBody(msgs[0].BodySection[0].Bytes)
 		}
 		return nil
 	})
-	return body, err
+	return markdown, rawHTML, webURL, err
 }
 
 // MoveMessage moves uid from src to dst using the IMAP MOVE command (RFC 6851).
@@ -508,11 +511,28 @@ func (c *Client) MarkUnseen(ctx context.Context, folder string, uid uint32) erro
 	})
 }
 
-// parsePlainText extracts the best available plain text from a raw MIME message.
-func parsePlainText(raw []byte) string {
+// parseBody extracts the best available content from a raw MIME message.
+// Returns (markdownBody, rawHTML, webURL).
+//   - markdownBody: what the TUI renders (HTML→markdown or normalised plain text)
+//   - rawHTML:      original HTML part verbatim (empty for plain-text emails)
+//   - webURL:       "view online" URL extracted from List-Post header or plain-text
+//     preamble (e.g. Substack's "View this post on the web at https://…")
+func parseBody(raw []byte) (markdown, rawHTML, webURL string) {
 	e, err := message.Read(bytes.NewReader(raw))
 	if err != nil && !message.IsUnknownCharset(err) {
-		return string(raw)
+		return string(raw), "", ""
+	}
+
+	// List-Post header contains the canonical article URL on most newsletters:
+	//   List-Post: <https://newsletter.example.com/p/slug>
+	if lp := e.Header.Get("List-Post"); lp != "" {
+		lp = strings.TrimSpace(lp)
+		if strings.HasPrefix(lp, "<") && strings.HasSuffix(lp, ">") {
+			u := lp[1 : len(lp)-1]
+			if strings.HasPrefix(u, "http") {
+				webURL = u
+			}
+		}
 	}
 
 	mr := mail.NewReader(e)
@@ -553,16 +573,36 @@ func parsePlainText(raw []byte) string {
 		}
 	}
 
+	// If List-Post didn't give us a URL, try the plain-text preamble.
+	// Substack and some others open with "View this post on the web at https://…"
+	if webURL == "" && plainText != "" {
+		webURL = extractPlainTextWebURL(plainText)
+	}
+
 	// Prefer HTML: newsletters and modern emails have rich HTML while the
 	// text/plain part is typically a stripped dump with raw redirect URLs.
 	// Fall back to plain text for plain-text-only emails (e.g. direct replies).
 	if htmlText != "" {
-		return htmlToMarkdown(htmlText)
+		return htmlToMarkdown(htmlText), htmlText, webURL
 	}
 	if plainText != "" {
-		return normalizePlainText(plainText)
+		return normalizePlainText(plainText), "", webURL
 	}
-	return "(no body)"
+	return "(no body)", "", webURL
+}
+
+// extractPlainTextWebURL looks for a "View … on the web at https://…" line
+// in the first few hundred bytes of a plain-text email body.
+func extractPlainTextWebURL(text string) string {
+	top := text
+	if len(top) > 500 {
+		top = top[:500]
+	}
+	re := regexp.MustCompile(`(?i)(?:view|read)[^\n]{0,40}(?:web|browser|online)[^\n]{0,20}(?:at\s+)?(https://\S+)`)
+	if m := re.FindStringSubmatch(top); m != nil {
+		return strings.TrimRight(m[1], ".,;)")
+	}
+	return ""
 }
 
 // htmlToMarkdown converts an HTML email body to Markdown so glamour can render

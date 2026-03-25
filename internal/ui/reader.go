@@ -50,7 +50,7 @@ func renderEmailHeader(e *imap.Email, width int) string {
 
 // readerHelp returns the one-line help string for the reader view.
 func readerHelp() string {
-	keys := []string{"j/k scroll", "space/d page", "h/q back", "r reply", "e nvim", "O browser", "? help"}
+	keys := []string{"j/k scroll", "space/d page", "h/q back", "r reply", "e nvim", "o w3m", "O browser", "ctrl+o web", "? help"}
 	return styleHelp.Render("  " + strings.Join(keys, " · "))
 }
 

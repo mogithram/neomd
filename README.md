@@ -225,7 +225,9 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `r` | reply  (from reader) |
 | `c` | compose new email |
 | `e  (reader)` | open in $EDITOR read-only — search, copy, vim motions |
-| `O  (reader)` | open in browser — $BROWSER or w3m |
+| `o  (reader)` | open in w3m (terminal browser) |
+| `O  (reader)` | open in $BROWSER (GUI browser, images shown) |
+| `ctrl+o  (reader)` | open web version / newsletter URL in $BROWSER |
 | `ctrl+a` | switch account  (if multiple configured) |
 
 
@@ -312,6 +314,10 @@ Press `:` to open the command line. Tab cycles through completions; Enter runs t
 | `:reset-toscreen` | `:rts` | move all ToScreen emails back to Inbox |
 | `:reload` | `:r` | reload the current folder |
 | `:quit` | `:q` | quit neomd |
+
+## Images
+
+The TUI reader shows emails as plain Markdown — images appear as `[Image: alt]` placeholders, keeping the reading experience clean and fast. To see images, press `O` to open the email as HTML in your `$BROWSER` (images load from remote URLs as normal). For newsletters, `ctrl+o` opens the canonical web version directly (extracted from the `List-Post` header or the plain-text preamble), which is usually the better reading experience anyway. `o` opens in `w3m` for a quick terminal preview without leaving the keyboard.
 
 ## How Sending Works
 

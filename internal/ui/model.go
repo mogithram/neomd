@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -38,8 +40,10 @@ type (
 		folder string
 	}
 	bodyLoadedMsg struct {
-		email *imap.Email
-		body  string
+		email   *imap.Email
+		body    string
+		rawHTML string // original HTML part, empty for plain-text emails
+		webURL  string // canonical "view online" URL (List-Post header or plain-text preamble)
 	}
 	sendDoneMsg       struct{ err error }
 	screenDoneMsg     struct{ err error }
@@ -108,8 +112,10 @@ type Model struct {
 
 	// Reader
 	reader    viewport.Model
-	openEmail *imap.Email
-	openBody  string // plain/markdown body of the open email (for external viewer)
+	openEmail    *imap.Email
+	openBody     string // markdown body used by the TUI reader
+	openHTMLBody string // original HTML part; used by openInExternalViewer when available
+	openWebURL   string // canonical "view online" URL for ctrl+o (may be empty)
 
 	// Compose
 	compose composeModel
@@ -248,11 +254,11 @@ func (m Model) fetchFolderCmd(folder string) tea.Cmd {
 
 func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	return func() tea.Msg {
-		body, err := m.imapCli().FetchBody(nil, e.Folder, e.UID)
+		body, rawHTML, webURL, err := m.imapCli().FetchBody(nil, e.Folder, e.UID)
 		if err != nil {
 			return errMsg{err}
 		}
-		return bodyLoadedMsg{email: e, body: body}
+		return bodyLoadedMsg{email: e, body: body, rawHTML: rawHTML, webURL: webURL}
 	}
 }
 
@@ -670,6 +676,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.openEmail = msg.email
 		m.openBody = msg.body
+		m.openHTMLBody = msg.rawHTML
+		m.openWebURL = msg.webURL
 		_ = loadEmailIntoReader(&m.reader, msg.email, msg.body, m.cfg.UI.Theme, m.width)
 		m.state = stateReading
 		// Mark as seen in background (best-effort)
@@ -1312,8 +1320,12 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "e":
 		return m.openInNeovim()
+	case "o":
+		return m.openInW3m()
 	case "O":
-		return m.openInExternalViewer()
+		return m.openInBrowser()
+	case "ctrl+o":
+		return m.openWebVersion()
 	case "r":
 		if m.openEmail != nil {
 			return m.launchReplyCmd()
@@ -1324,24 +1336,24 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// openInExternalViewer renders the open email as HTML, writes it to a temp
-// file, and opens it with $BROWSER (falling back to w3m), same pattern as
-// newsboat's "open in browser" binding.
-func (m Model) openInExternalViewer() (tea.Model, tea.Cmd) {
-	body := m.openBody
-	if body == "" {
+// openInBrowser writes the email as HTML to a temp file and opens it in
+// $BROWSER (xdg-open as fallback). Uses cmd.Start() — not ExecProcess — because
+// GUI browsers (and xdg-open) exit immediately after handing off; ExecProcess
+// would delete the temp file before the browser has loaded it.
+func (m Model) openInBrowser() (tea.Model, tea.Cmd) {
+	if m.openBody == "" {
 		return m, nil
 	}
 
-	browser := os.Getenv("BROWSER")
-	if browser == "" {
-		browser = "w3m"
-	}
-
-	// Render markdown → HTML so links are clickable in w3m.
-	htmlBody, err := render.ToHTML(body)
-	if err != nil {
-		htmlBody = "<pre>" + body + "</pre>"
+	var htmlBody string
+	if m.openHTMLBody != "" {
+		htmlBody = m.openHTMLBody
+	} else {
+		var err error
+		htmlBody, err = render.ToHTML(m.openBody)
+		if err != nil {
+			htmlBody = "<pre>" + m.openBody + "</pre>"
+		}
 	}
 
 	f, err := os.CreateTemp("", "neomd-view-*.html")
@@ -1354,7 +1366,54 @@ func (m Model) openInExternalViewer() (tea.Model, tea.Cmd) {
 	f.WriteString(htmlBody) //nolint
 	f.Close()
 
-	cmd := exec.Command(browser, tmpPath)
+	browser := os.Getenv("BROWSER")
+	if browser == "" {
+		browser = "xdg-open"
+	}
+
+	return m, func() tea.Msg {
+		cmd := exec.Command(browser, tmpPath)
+		_ = cmd.Start()
+		// xdg-open exits immediately after handing off to the browser process,
+		// so cmd.Wait() returns before the browser has read the file.
+		// Sleep long enough for any browser to finish loading from disk.
+		go func() {
+			time.Sleep(15 * time.Second)
+			os.Remove(tmpPath)
+		}()
+		return nil
+	}
+}
+
+// openInW3m writes the email as HTML to a temp file and opens it in w3m.
+// w3m is a TUI process so ExecProcess (suspend/resume) is correct here.
+func (m Model) openInW3m() (tea.Model, tea.Cmd) {
+	if m.openBody == "" {
+		return m, nil
+	}
+
+	var htmlBody string
+	if m.openHTMLBody != "" {
+		htmlBody = m.openHTMLBody
+	} else {
+		var err error
+		htmlBody, err = render.ToHTML(m.openBody)
+		if err != nil {
+			htmlBody = "<pre>" + m.openBody + "</pre>"
+		}
+	}
+
+	f, err := os.CreateTemp("", "neomd-view-*.html")
+	if err != nil {
+		m.status = "open: " + err.Error()
+		m.isError = true
+		return m, nil
+	}
+	tmpPath := f.Name()
+	f.WriteString(htmlBody) //nolint
+	f.Close()
+
+	cmd := exec.Command("w3m", tmpPath)
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 		os.Remove(tmpPath)
 		if err != nil {
@@ -1362,6 +1421,58 @@ func (m Model) openInExternalViewer() (tea.Model, tea.Cmd) {
 		}
 		return nil
 	})
+}
+
+// openWebVersion opens the canonical "view online" URL for this email in $BROWSER.
+// URL is extracted at fetch time from the List-Post header or plain-text preamble
+// (Substack: "View this post on the web at …"). Falls back to HTML anchor scan.
+func (m Model) openWebVersion() (tea.Model, tea.Cmd) {
+	url := m.openWebURL
+	if url == "" {
+		url = extractWebVersionURL(m.openHTMLBody) // HTML anchor scan as last resort
+	}
+	if url == "" {
+		m.status = "No web version link found in this email."
+		return m, nil
+	}
+
+	browser := os.Getenv("BROWSER")
+	if browser == "" {
+		browser = "xdg-open"
+	}
+	return m, func() tea.Msg {
+		_ = exec.Command(browser, url).Start()
+		return nil
+	}
+}
+
+// extractWebVersionURL looks for the "view in browser" / "read online" link
+// that newsletter platforms insert near the top of every HTML email.
+// Searches only the first 3000 bytes (the link is always in the preheader).
+func extractWebVersionURL(body string) string {
+	// Limit search to the top of the email where "view online" links live.
+	top := body
+	if len(top) > 3000 {
+		top = top[:3000]
+	}
+
+	// Anchor text patterns used by major platforms:
+	//   "View in browser"      — Mailchimp, generic
+	//   "View online"          — many platforms
+	//   "Read online"          — ConvertKit, generic
+	//   "Read on Substack"     — Substack
+	//   "Read on Beehiiv"      — Beehiiv
+	//   "Open in browser"      — Ghost
+	//   "View web version"     — generic
+	//   "View this email"      — Mailchimp variant
+	re := regexp.MustCompile(`(?i)<a[^>]+href=["']([^"'#][^"']*?)["'][^>]*>\s*(?:[^<]*\s)?(?:view|read|open|see)\b[^<]*</a>`)
+	for _, m := range re.FindAllStringSubmatch(top, -1) {
+		u := m[1]
+		if strings.HasPrefix(u, "http") {
+			return u
+		}
+	}
+	return ""
 }
 
 // openInNeovim opens the current email's markdown body in nvim -R (read-only)
