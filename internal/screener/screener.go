@@ -82,17 +82,24 @@ func New(cfg Config) (*Screener, error) {
 func (s *Screener) Classify(from string) Category {
 	addr := normalise(from)
 	switch {
-	case s.screenedIn[addr]:
-		return CategoryInbox
 	case s.screenedOut[addr]:
-		return CategoryScreenedOut
+		return CategoryScreenedOut // hard block always wins
 	case s.feed[addr]:
-		return CategoryFeed
+		return CategoryFeed // specific routing beats generic approval
 	case s.paperTrail[addr]:
 		return CategoryPaperTrail
+	case s.screenedIn[addr]:
+		return CategoryInbox // trusted but no specific folder → stay in Inbox
 	default:
 		return CategoryToScreen
 	}
+}
+
+// ClassifyDebug is like Classify but also returns the normalised address used
+// for the lookup, for diagnostic purposes.
+func (s *Screener) ClassifyDebug(from string) (Category, string) {
+	addr := normalise(from)
+	return s.Classify(from), addr
 }
 
 // Approve adds addr to screened_in.txt and updates the in-memory set.
@@ -143,7 +150,7 @@ func loadList(path string, m map[string]bool) error {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		m[strings.ToLower(line)] = true
+		m[normalise(line)] = true
 	}
 	return sc.Err()
 }

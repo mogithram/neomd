@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -145,6 +146,12 @@ type Model struct {
 	// folderCounts holds unseen message counts for watched folder tabs.
 	// Keys are tab labels: "Inbox", "PaperTrail", "Waiting", "Scheduled".
 	folderCounts map[string]int
+
+	// Sort state. sortField is one of "date", "from", "subject", "size".
+	// sortReverse=true means newest/largest/Z-first (descending).
+	// Default: date descending (newest first).
+	sortField   string
+	sortReverse bool
 }
 
 // New creates and initialises the TUI model.
@@ -153,16 +160,18 @@ func New(cfg *config.Config, clients []*imap.Client, sc *screener.Screener) Mode
 	sp.Spinner = spinner.Dot
 
 	return Model{
-		cfg:        cfg,
-		accounts:   cfg.ActiveAccounts(),
-		clients:    clients,
-		screener:   sc,
-		state:      stateInbox,
-		loading:    true,
-		folders:    []string{"Inbox", "ToScreen", "Feed", "PaperTrail", "Archive", "Waiting", "Someday", "Scheduled", "Sent", "Trash", "ScreenedOut"},
-		compose:    newComposeModel(),
-		spinner:    sp,
-		markedUIDs: make(map[uint32]bool),
+		cfg:         cfg,
+		accounts:    cfg.ActiveAccounts(),
+		clients:     clients,
+		screener:    sc,
+		state:       stateInbox,
+		loading:     true,
+		folders:     []string{"Inbox", "ToScreen", "Feed", "PaperTrail", "Archive", "Waiting", "Someday", "Scheduled", "Sent", "Trash", "ScreenedOut"},
+		compose:     newComposeModel(),
+		spinner:     sp,
+		markedUIDs:  make(map[uint32]bool),
+		sortField:   "date",
+		sortReverse: true, // newest first
 	}
 }
 
@@ -560,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.markedUIDs = make(map[uint32]bool) // clear marks on folder reload
 		m.filterActive = false
 		m.filterText = ""
-		cmd := setEmails(&m.inbox, msg.emails, m.markedUIDs)
+		cmd := m.sortEmails() // applies sort and sets list items
 		return m, tea.Batch(cmd, m.fetchFolderCountsCmd())
 
 	case folderCountsMsg:
@@ -882,6 +891,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "move to:  Mi inbox  Ma archive  Mf feed  Mp papertrail  Mt trash  Mo screened-out  Mw waiting  Mm someday"
 		return m, nil
 
+	case ",":
+		m.pendingKey = ","
+		m.status = "sort:  ,m date↓  ,M date↑  ,a from A-Z  ,A from Z-A  ,s size↑  ,S size↓  ,n subject A-Z  ,N subject Z-A"
+		return m, nil
+
 	// ── Mark for batch / delete ─────────────────────────────────────
 	case "x":
 		targets := m.targetEmails()
@@ -1048,6 +1062,31 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// sortEmails sorts m.emails in place according to m.sortField / m.sortReverse,
+// then refreshes the list widget.
+func (m *Model) sortEmails() tea.Cmd {
+	field, rev := m.sortField, m.sortReverse
+	sort.SliceStable(m.emails, func(i, j int) bool {
+		a, b := m.emails[i], m.emails[j]
+		var less bool
+		switch field {
+		case "from":
+			less = strings.ToLower(a.From) < strings.ToLower(b.From)
+		case "subject":
+			less = strings.ToLower(a.Subject) < strings.ToLower(b.Subject)
+		case "size":
+			less = a.Size < b.Size
+		default: // "date"
+			less = a.Date.Before(b.Date)
+		}
+		if rev {
+			return !less
+		}
+		return less
+	})
+	return setEmails(&m.inbox, m.emails, m.markedUIDs)
+}
+
 // applyFilter filters m.emails by filterText and refreshes the list.
 // Call this whenever filterText changes.
 func (m *Model) applyFilter() tea.Cmd {
@@ -1119,6 +1158,35 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.spinner.Tick, m.batchMoveCmd(targets, dst))
 		}
 		m.status = fmt.Sprintf("unknown: M%s", key)
+
+	case ",":
+		type sortSpec struct{ field string; rev bool }
+		specs := map[string]sortSpec{
+			"m": {"date", true},
+			"M": {"date", false},
+			"a": {"from", false},
+			"A": {"from", true},
+			"s": {"size", false},
+			"S": {"size", true},
+			"n": {"subject", false},
+			"N": {"subject", true},
+		}
+		if sp, ok := specs[key]; ok {
+			m.sortField, m.sortReverse = sp.field, sp.rev
+			label := map[string]string{
+				"m": "date ↓ (newest first)",
+				"M": "date ↑ (oldest first)",
+				"a": "from A→Z",
+				"A": "from Z→A",
+				"s": "size ↑ (smallest first)",
+				"S": "size ↓ (largest first)",
+				"n": "subject A→Z",
+				"N": "subject Z→A",
+			}[key]
+			m.status = "Sort: " + label
+			return m, m.sortEmails()
+		}
+		m.status = fmt.Sprintf("unknown: ,%s", key)
 	}
 	return m, nil
 }

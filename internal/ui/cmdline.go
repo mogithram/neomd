@@ -58,6 +58,21 @@ func init() {
 			},
 		},
 		{
+			name:    "check",
+			aliases: []string{"ch"},
+			desc:    "show screener classification for the selected email (diagnostic)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				e := selectedEmail(m.inbox)
+				if e == nil {
+					m.status = "No email selected."
+					return m, nil
+				}
+				cat, addr := m.screener.ClassifyDebug(e.From)
+				m.status = fmt.Sprintf("from=%q  addr=%q  → %s", e.From, addr, cat)
+				return m, nil
+			},
+		},
+		{
 			name:    "reset-toscreen",
 			aliases: []string{"rts"},
 			desc:    "move all ToScreen emails back to Inbox (then run screen-all to reclassify)",

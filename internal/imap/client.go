@@ -5,6 +5,7 @@ package imap
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -381,8 +382,27 @@ func (c *Client) MoveMessage(ctx context.Context, src string, uid uint32, dst st
 		}
 		var uidSet imap.UIDSet
 		uidSet.AddNum(imap.UID(uid))
-		if _, err := conn.Move(uidSet, dst).Wait(); err != nil {
+		_, err := conn.Move(uidSet, dst).Wait()
+		if err != nil {
+			// If the server says the destination doesn't exist, create it and retry.
+			var imapErr *imap.Error
+		if errors.As(err, &imapErr) && imapErr.Code == imap.ResponseCodeTryCreate {
+			if cerr := conn.Create(dst, nil).Wait(); cerr != nil {
+				return fmt.Errorf("CREATE %s: %w", dst, cerr)
+			}
+			// Subscribe so the folder appears in webmail and other clients.
+			_ = conn.Subscribe(dst).Wait()
+			// Re-select src after CREATE (server may have deselected it)
+			c.selectedMailbox = ""
+			if err := c.selectMailbox(src); err != nil {
+				return err
+			}
+			if _, err = conn.Move(uidSet, dst).Wait(); err != nil {
+				return fmt.Errorf("MOVE %d → %s (after CREATE): %w", uid, dst, err)
+			}
+		} else {
 			return fmt.Errorf("MOVE %d → %s: %w", uid, dst, err)
+		}
 		}
 		c.selectedMailbox = "" // mailbox state changes after move
 		return nil
