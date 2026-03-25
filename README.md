@@ -2,7 +2,7 @@
 
 A minimal terminal email client for people who write in Markdown and live in Neovim.
 
-[Neomd](https://www.ssp.sh/brain/neomd/) this is my way of implementing a email TUI based on my experience on [Neomutt](https://www.ssp.sh/brain/neomutt) focus on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing ([Markdown](https://www.ssp.sh/brain/markdown)) and navigating, [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions).
+[Neomd](https://www.ssp.sh/brain/neomd/) This is my way of implementing an email TUI based on my experience with Neomutt, focusing on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing in [Markdown](https://www.ssp.sh/brain/markdown) and navigating with [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions).
 
 ![neomd](images/neomd.png)
 
