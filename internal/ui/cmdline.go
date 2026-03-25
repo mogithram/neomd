@@ -58,6 +58,20 @@ func init() {
 			},
 		},
 		{
+			name:    "mark-read",
+			aliases: []string{"mr"},
+			desc:    "mark all emails in current folder as read",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				cmd := m.markAllSeenCmd()
+				if cmd == nil {
+					m.status = "All already read."
+					return m, nil
+				}
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, cmd)
+			},
+		},
+		{
 			name:    "check",
 			aliases: []string{"ch"},
 			desc:    "show screener classification for the selected email (diagnostic)",
@@ -79,6 +93,24 @@ func init() {
 			run: func(m *Model) (tea.Model, tea.Cmd) {
 				m.loading = true
 				return m, tea.Batch(m.spinner.Tick, m.resetToScreenSearchCmd())
+			},
+		},
+		{
+			name:    "delete-all",
+			aliases: []string{"da"},
+			desc:    "permanently delete ALL emails in the current folder (y/n confirmation)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.deleteAllSearchCmd())
+			},
+		},
+		{
+			name:    "create-folders",
+			aliases: []string{"cf"},
+			desc:    "create any missing IMAP folders defined in config (safe to run multiple times)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.ensureFoldersCmd())
 			},
 		},
 		{

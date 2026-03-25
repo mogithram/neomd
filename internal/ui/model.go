@@ -63,6 +63,10 @@ type (
 	resetToScreenReadyMsg struct{ uids []uint32 }
 	// folderCountsMsg carries unseen counts for watched folder tabs.
 	folderCountsMsg struct{ counts map[string]int }
+	// deleteAllReadyMsg carries UIDs to permanently delete after y/n confirm.
+	deleteAllReadyMsg struct{ uids []uint32; folder string }
+	// ensureFoldersDoneMsg reports which folders were created.
+	ensureFoldersDoneMsg struct{ created []string; err error }
 	moveDoneMsg       struct{ err error }
 	batchDoneMsg      struct{ err error }
 	toggleSeenDoneMsg struct{ uid uint32; seen bool; err error }
@@ -142,6 +146,9 @@ type Model struct {
 	// pendingResetUIDs holds ToScreen UIDs awaiting y/n confirmation before
 	// being bulk-moved back to Inbox.
 	pendingResetUIDs []uint32
+
+	// pendingDeleteAll holds UIDs + folder awaiting y/n before permanent deletion.
+	pendingDeleteAll *deleteAllReadyMsg
 
 	// folderCounts holds unseen message counts for watched folder tabs.
 	// Keys are tab labels: "Inbox", "PaperTrail", "Waiting", "Scheduled".
@@ -367,6 +374,28 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 	}
 }
 
+// markAllSeenCmd marks every currently loaded email in the folder as \Seen.
+func (m Model) markAllSeenCmd() tea.Cmd {
+	type op struct{ folder string; uid uint32 }
+	var ops []op
+	for _, e := range m.emails {
+		if !e.Seen {
+			ops = append(ops, op{e.Folder, e.UID})
+		}
+	}
+	if len(ops) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		for _, o := range ops {
+			if err := m.imapCli().MarkSeen(nil, o.folder, o.uid); err != nil {
+				return batchDoneMsg{err}
+			}
+		}
+		return batchDoneMsg{}
+	}
+}
+
 // batchToggleSeenCmd toggles \Seen on multiple emails, emitting batchDoneMsg.
 func (m Model) batchToggleSeenCmd(emails []imap.Email) tea.Cmd {
 	type op struct{ folder string; uid uint32; markSeen bool }
@@ -479,6 +508,40 @@ func (m Model) resetToScreenMoveCmd(uids []uint32) tea.Cmd {
 	}
 }
 
+// ensureFoldersCmd creates any configured folders that don't exist yet.
+func (m Model) ensureFoldersCmd() tea.Cmd {
+	f := m.cfg.Folders
+	folders := []string{
+		f.Inbox, f.Sent, f.Trash, f.Drafts,
+		f.ToScreen, f.Feed, f.PaperTrail, f.ScreenedOut,
+		f.Archive, f.Waiting, f.Scheduled, f.Someday,
+	}
+	return func() tea.Msg {
+		created, err := m.imapCli().EnsureFolders(nil, folders)
+		return ensureFoldersDoneMsg{created: created, err: err}
+	}
+}
+
+// deleteAllSearchCmd is phase 1: count UIDs in the current folder before
+// asking for confirmation.
+func (m Model) deleteAllSearchCmd() tea.Cmd {
+	folder := m.activeFolder()
+	return func() tea.Msg {
+		uids, err := m.imapCli().SearchUIDs(nil, folder)
+		if err != nil {
+			return errMsg{err}
+		}
+		return deleteAllReadyMsg{uids: uids, folder: folder}
+	}
+}
+
+// deleteAllExecCmd permanently deletes all given UIDs from folder.
+func (m Model) deleteAllExecCmd(folder string, uids []uint32) tea.Cmd {
+	return func() tea.Msg {
+		return batchDoneMsg{m.imapCli().ExpungeAll(nil, folder, uids)}
+	}
+}
+
 // fetchFolderCountsCmd fetches unseen counts for the four watched tabs in the
 // background using IMAP STATUS (no SELECT, very fast).
 func (m Model) fetchFolderCountsCmd() tea.Cmd {
@@ -574,6 +637,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case folderCountsMsg:
 		m.folderCounts = msg.counts
+		return m, nil
+
+	case ensureFoldersDoneMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			m.isError = true
+			return m, nil
+		}
+		if len(msg.created) == 0 {
+			m.status = "All folders already exist."
+		} else {
+			m.status = fmt.Sprintf("Created %d folder(s): %s", len(msg.created), strings.Join(msg.created, ", "))
+		}
+		return m, nil
+
+	case deleteAllReadyMsg:
+		if len(msg.uids) == 0 {
+			m.loading = false
+			m.status = "Folder is already empty."
+			return m, nil
+		}
+		m.loading = false
+		m.pendingDeleteAll = &msg
+		m.status = fmt.Sprintf("PERMANENTLY delete %d email(s) from %s?  · y to confirm, n to cancel", len(msg.uids), msg.folder)
+		m.isError = true // red to make it stand out
 		return m, nil
 
 	case bodyLoadedMsg:
@@ -872,6 +961,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key != "y" && key != "n" {
 		m.pendingMoves = nil
 		m.pendingResetUIDs = nil
+		m.pendingDeleteAll = nil
 	}
 	m.status = ""
 	m.isError = false
@@ -956,6 +1046,13 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "y":
+		if m.pendingDeleteAll != nil {
+			p := m.pendingDeleteAll
+			m.pendingDeleteAll = nil
+			m.isError = false
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.deleteAllExecCmd(p.folder, p.uids))
+		}
 		if len(m.pendingResetUIDs) > 0 {
 			uids := m.pendingResetUIDs
 			m.pendingResetUIDs = nil
@@ -971,9 +1068,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.execAutoScreenCmd(moves))
 
 	case "n":
-		if len(m.pendingResetUIDs) > 0 || len(m.pendingMoves) > 0 {
+		if m.pendingDeleteAll != nil || len(m.pendingResetUIDs) > 0 || len(m.pendingMoves) > 0 {
+			m.pendingDeleteAll = nil
 			m.pendingResetUIDs = nil
 			m.pendingMoves = nil
+			m.isError = false
 			m.status = "Cancelled."
 			return m, nil
 		}
@@ -997,6 +1096,15 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterActive = true
 		m.filterText = ""
 		return m, m.applyFilter()
+
+	case "ctrl+n": // mark all loaded emails in this folder as read
+		cmd := m.markAllSeenCmd()
+		if cmd == nil {
+			m.status = "All already read."
+			return m, nil
+		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, cmd)
 
 	case "ctrl+a":
 		if len(m.clients) > 1 {
@@ -1486,78 +1594,10 @@ func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewHelp() string {
-	type section struct {
-		title string
-		rows  [][2]string // [key, description]
-	}
-	sections := []section{
-		{"Navigation", [][2]string{
-			{"j / k", "move down / up"},
-			{"gg", "jump to top"},
-			{"G", "jump to bottom"},
-			{"enter / l", "open email"},
-			{"h / q / esc", "back to inbox (from reader)"},
-		}},
-		{"Folders", [][2]string{
-			{"L / tab", "next folder tab"},
-			{"H / shift+tab", "previous folder tab"},
-			{"gi", "go to Inbox"},
-			{"ga", "go to Archive"},
-			{"gf", "go to Feed"},
-			{"gp", "go to PaperTrail"},
-			{"gt", "go to Trash"},
-			{"gs", "go to Sent"},
-			{"gk", "go to ToScreen"},
-			{"go", "go to ScreenedOut"},
-			{"gw", "go to Waiting"},
-			{"gm", "go to Someday"},
-		}},
-		{"Screener  (marked or cursor, any folder)", [][2]string{
-			{"I", "approve sender → screened_in + move to Inbox"},
-			{"O", "block sender  → screened_out + move to ScreenedOut"},
-			{"F", "mark as Feed  → feed.txt + move to Feed"},
-			{"P", "mark as PaperTrail → papertrail.txt + move to PaperTrail"},
-			{"A", "archive (move to Archive, no screener update)"},
-			{"S", "dry-run screen inbox (loaded emails, then y/n)"},
-		{"ctrl+s", "deep screen ALL inbox emails (fetch all, then y/n)"},
-		}},
-		{"Move  (marked or cursor, no screener update)", [][2]string{
-			{"x", "delete → Trash"},
-			{"Mi", "move to Inbox"},
-			{"Ma", "move to Archive"},
-			{"Mf", "move to Feed"},
-			{"Mp", "move to PaperTrail"},
-			{"Mt", "move to Trash"},
-			{"Mo", "move to ScreenedOut"},
-			{"Mw", "move to Waiting"},
-			{"Mm", "move to Someday"},
-		}},
-		{"Multi-select", [][2]string{
-			{"space", "mark / unmark email + advance cursor"},
-			{"U", "clear all marks"},
-			{"x", "delete marked (or cursor) → Trash"},
-		}},
-		{"Email actions", [][2]string{
-			{"N", "toggle read/unread  (applies to marked or cursor)"},
-			{"R", "reload / refresh folder"},
-			{"r", "reply  (from reader)"},
-			{"c", "compose new email"},
-			{"e  (reader)", "open in neovim -R (read, search, copy)"},
-			{"O  (reader)", "open in browser (w3m / $BROWSER)"},
-			{"ctrl+a", "switch account  (if multiple configured)"},
-		}},
-		{"General", [][2]string{
-			{"/", "filter emails"},
-			{":", "command line  (:screen  :screen-all  :reload  :quit + tab-complete)"},
-			{"?", "toggle this help"},
-			{"q", "quit  (from inbox)"},
-		}},
-	}
-
 	heading := styleHeader.Render("  Keyboard shortcuts")
 	sep := styleSeparator.Render(strings.Repeat("─", m.width))
 
-	keyStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Width(22)
+	keyStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Width(24)
 	titleStyle := lipgloss.NewStyle().Foreground(colorDateCol).Bold(true)
 	descStyle := lipgloss.NewStyle().Foreground(colorText)
 	matchStyle := lipgloss.NewStyle().Foreground(colorAuthorUnread).Bold(true)
@@ -1566,10 +1606,9 @@ func (m Model) viewHelp() string {
 
 	var b strings.Builder
 	b.WriteString(heading + "\n" + sep + "\n")
-	for _, sec := range sections {
-		// collect matching rows
+	for _, sec := range HelpSections {
 		var matched [][2]string
-		for _, row := range sec.rows {
+		for _, row := range sec.Rows {
 			if filter == "" || strings.Contains(strings.ToLower(row[0]), filter) || strings.Contains(strings.ToLower(row[1]), filter) {
 				matched = append(matched, row)
 			}
@@ -1577,7 +1616,7 @@ func (m Model) viewHelp() string {
 		if len(matched) == 0 {
 			continue
 		}
-		b.WriteString("\n" + titleStyle.Render("  "+sec.title) + "\n")
+		b.WriteString("\n" + titleStyle.Render("  "+sec.Title) + "\n")
 		for _, row := range matched {
 			b.WriteString("  " + keyStyle.Render(row[0]) + descStyle.Render(row[1]) + "\n")
 		}

@@ -81,89 +81,137 @@ Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your
 
 Press `?` inside neomd to open the interactive help overlay. Start typing to filter shortcuts.
 
+> The tables below are generated from [`internal/ui/keys.go`](internal/ui/keys.go).
+> To update both the help overlay and this section at once, edit that file and run `make docs`.
+
+<!-- keybindings-start -->
+
 ### Navigation
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Move down / up |
-| `gg` | Jump to top |
-| `G` | Jump to bottom |
-| `enter` / `l` | Open email |
-| `h` / `q` / `esc` | Back to inbox (from reader) |
-| `?` | Toggle help overlay (type to filter) |
+| `j / k` | move down / up |
+| `gg` | jump to top |
+| `G` | jump to bottom |
+| `enter / l` | open email |
+| `h / q / esc` | back to inbox (from reader) |
+| `?` | toggle help overlay (type to filter) |
+
 
 ### Folders
 
 | Key | Action |
 |-----|--------|
-| `L` / `tab` | Next folder tab |
-| `H` / `shift+tab` | Previous folder tab |
-| `gi` | Go to Inbox |
-| `ga` | Go to Archive |
-| `gf` | Go to Feed |
-| `gp` | Go to PaperTrail |
-| `gt` | Go to Trash |
-| `gs` | Go to Sent |
-| `gk` | Go to ToScreen |
-| `go` | Go to ScreenedOut |
-| `gw` | Go to Waiting |
-| `gm` | Go to Someday |
+| `L / tab` | next folder tab |
+| `H / shift+tab` | previous folder tab |
+| `gi` | go to Inbox |
+| `ga` | go to Archive |
+| `gf` | go to Feed |
+| `gp` | go to PaperTrail |
+| `gt` | go to Trash |
+| `gs` | go to Sent |
+| `gk` | go to ToScreen |
+| `go` | go to ScreenedOut |
+| `gw` | go to Waiting |
+| `gm` | go to Someday |
 
-### Multi-select & Batch operations
 
-| Key | Action |
-|-----|--------|
-| `space` | Mark / unmark email + advance cursor |
-| `U` | Clear all marks |
-| `x` | Delete marked (or cursor) → Trash |
-| `A` | Archive marked (or cursor) → Archive |
-
-All screener and move actions below apply to **all marked emails**, or just the cursor email if nothing is marked.
-
-### Screener (any folder)
+### Screener  (marked or cursor, any folder)
 
 | Key | Action |
 |-----|--------|
-| `I` | Approve sender → `screened_in.txt` + move to Inbox |
-| `O` | Block sender → `screened_out.txt` + move to ScreenedOut |
-| `F` | Mark as Feed → `feed.txt` + move to Feed |
-| `P` | Mark as PaperTrail → `papertrail.txt` + move to PaperTrail |
-| `S` | Dry-run screen Inbox (shows preview, then `y` to apply / `n` to cancel) |
+| `I` | approve sender → screened_in.txt + move to Inbox |
+| `O` | block sender → screened_out.txt + move to ScreenedOut |
+| `F` | mark as Feed → feed.txt + move to Feed |
+| `P` | mark as PaperTrail → papertrail.txt + move to PaperTrail |
+| `A` | archive (move to Archive, no screener update) |
+| `S` | dry-run screen inbox (loaded emails), then y/n |
 
-### Move (no screener update)
+
+### Move  (marked or cursor, no screener update)
 
 | Key | Action |
 |-----|--------|
-| `Mi` | Move to Inbox |
-| `Ma` | Move to Archive |
-| `Mf` | Move to Feed |
-| `Mp` | Move to PaperTrail |
-| `Mt` | Move to Trash |
-| `Mo` | Move to ScreenedOut |
-| `Mw` | Move to Waiting |
-| `Mm` | Move to Someday |
+| `x` | delete → Trash |
+| `Mi` | move to Inbox |
+| `Ma` | move to Archive |
+| `Mf` | move to Feed |
+| `Mp` | move to PaperTrail |
+| `Mt` | move to Trash |
+| `Mo` | move to ScreenedOut |
+| `Mw` | move to Waiting |
+| `Mm` | move to Someday |
+
+
+### Multi-select
+
+| Key | Action |
+|-----|--------|
+| `space` | mark / unmark email + advance cursor |
+| `U` | clear all marks |
+
+
+### Sort  (, prefix)
+
+| Key | Action |
+|-----|--------|
+| `,m` | date newest first (default) |
+| `,M` | date oldest first |
+| `,a` | from A→Z |
+| `,A` | from Z→A |
+| `,s` | size smallest first |
+| `,S` | size largest first |
+| `,n` | subject A→Z |
+| `,N` | subject Z→A |
+
 
 ### Email actions
 
 | Key | Action |
 |-----|--------|
-| `N` | Toggle read/unread (applies to marked or cursor) |
-| `R` | Reload / refresh folder |
-| `r` | Reply (from reader) |
-| `c` | Compose new email |
-| `e` | Open in `$EDITOR` (read-only) — search, copy, vim motions (from reader) |
-| `O` | Open in browser — `$BROWSER` or `w3m` (from reader) |
-| `ctrl+a` | Switch account (if multiple configured) |
-| `/` | Filter emails |
-| `q` | Quit |
+| `N` | toggle read/unread  (marked or cursor) |
+| `ctrl+n` | mark all in current folder as read |
+| `R` | reload / refresh folder |
+| `r` | reply  (from reader) |
+| `c` | compose new email |
+| `e  (reader)` | open in $EDITOR read-only — search, copy, vim motions |
+| `O  (reader)` | open in browser — $BROWSER or w3m |
+| `ctrl+a` | switch account  (if multiple configured) |
+
+
+### Command line  (: to open, tab to complete)
+
+| Key | Action |
+|-----|--------|
+| `:screen  / :s` | dry-run screen loaded inbox emails |
+| `:screen-all  / :sa` | dry-run screen ALL inbox emails (no limit) |
+| `:reset-toscreen  / :rts` | move all ToScreen emails back to Inbox |
+| `:mark-read  / :mr` | mark all emails in current folder as read |
+| `:reload  / :r` | reload current folder |
+| `:check  / :ch` | show screener classification for selected email |
+| `:delete-all  / :da` | permanently delete ALL emails in current folder (y/n) |
+| `:create-folders  / :cf` | create missing IMAP folders from config (safe, idempotent) |
+| `:quit  / :q` | quit neomd |
+
 
 ### Composing
 
 | Key | Action |
 |-----|--------|
-| `tab` / `enter` | Move to next field |
-| `enter` (on Subject) | Open `$EDITOR` with a `.md` temp file |
-| `esc` | Cancel |
+| `tab / enter` | move to next field |
+| `enter  (on Subject)` | open $EDITOR with a .md temp file |
+| `esc` | cancel |
+
+
+### General
+
+| Key | Action |
+|-----|--------|
+| `/` | filter emails in current folder |
+| `?` | toggle this help |
+| `q` | quit  (from inbox) |
+
+<!-- keybindings-end -->
 
 After saving and closing the editor, the email is sent automatically.
 

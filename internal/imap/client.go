@@ -409,6 +409,69 @@ func (c *Client) MoveMessage(ctx context.Context, src string, uid uint32, dst st
 	})
 }
 
+// EnsureFolders creates and subscribes any folders in the list that do not
+// yet exist on the server. Already-existing folders are silently skipped.
+// Returns the names of folders that were actually created.
+func (c *Client) EnsureFolders(ctx context.Context, folders []string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var created []string
+	err := c.withConn(ctx, func(conn *imapclient.Client) error {
+		for _, folder := range folders {
+			if folder == "" {
+				continue
+			}
+			err := conn.Create(folder, nil).Wait()
+			if err != nil {
+				var imapErr *imap.Error
+				if errors.As(err, &imapErr) && imapErr.Code == imap.ResponseCodeAlreadyExists {
+					continue // already there, nothing to do
+				}
+				return fmt.Errorf("CREATE %s: %w", folder, err)
+			}
+			_ = conn.Subscribe(folder).Wait()
+			created = append(created, folder)
+		}
+		return nil
+	})
+	return created, err
+}
+
+// ExpungeAll permanently deletes every message in folder by marking all
+// messages \Deleted then issuing UID EXPUNGE.
+func (c *Client) ExpungeAll(ctx context.Context, folder string, uids []uint32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(uids) == 0 {
+		return nil
+	}
+	return c.withConn(ctx, func(conn *imapclient.Client) error {
+		if err := c.selectMailbox(folder); err != nil {
+			return err
+		}
+		var uidSet imap.UIDSet
+		for _, uid := range uids {
+			uidSet.AddNum(imap.UID(uid))
+		}
+		// Mark all \Deleted (silent — no need to read the response)
+		if err := conn.Store(uidSet, &imap.StoreFlags{
+			Op:     imap.StoreFlagsAdd,
+			Silent: true,
+			Flags:  []imap.Flag{imap.FlagDeleted},
+		}, nil).Close(); err != nil {
+			return fmt.Errorf("STORE \\Deleted: %w", err)
+		}
+		// Expunge only the UIDs we just marked (safe for concurrent clients)
+		if _, err := conn.UIDExpunge(uidSet).Collect(); err != nil {
+			return fmt.Errorf("UID EXPUNGE: %w", err)
+		}
+		c.selectedMailbox = ""
+		return nil
+	})
+}
+
 // MarkSeen marks a message as \Seen.
 func (c *Client) MarkSeen(ctx context.Context, folder string, uid uint32) error {
 	if ctx == nil {

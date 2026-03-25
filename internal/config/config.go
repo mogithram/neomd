@@ -107,6 +107,13 @@ func Load(path string) (*Config, error) {
 	cfg.Screener.Feed = expandPath(cfg.Screener.Feed)
 	cfg.Screener.PaperTrail = expandPath(cfg.Screener.PaperTrail)
 
+	for i := range cfg.Accounts {
+		cfg.Accounts[i].Password = expandEnv(cfg.Accounts[i].Password)
+		cfg.Accounts[i].User = expandEnv(cfg.Accounts[i].User)
+	}
+	cfg.Account.Password = expandEnv(cfg.Account.Password)
+	cfg.Account.User = expandEnv(cfg.Account.User)
+
 	return cfg, nil
 }
 
@@ -158,6 +165,22 @@ func writeDefault(path string, cfg *Config) error {
 	}
 	defer f.Close()
 	return toml.NewEncoder(f).Encode(cfg)
+}
+
+// expandEnv resolves a value that is entirely a single env var reference
+// ($VAR or ${VAR}). If the value contains other text or multiple $ signs
+// it is returned as-is, so passwords containing $ are never mangled.
+func expandEnv(s string) string {
+	s = strings.TrimSpace(s)
+	// ${VAR} form
+	if strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}") && strings.Count(s, "$") == 1 {
+		return os.Getenv(s[2 : len(s)-1])
+	}
+	// $VAR form — must be a single token with no other characters
+	if strings.HasPrefix(s, "$") && strings.Count(s, "$") == 1 && !strings.ContainsAny(s[1:], " \t${}") {
+		return os.Getenv(s[1:])
+	}
+	return s
 }
 
 func expandPath(path string) string {
