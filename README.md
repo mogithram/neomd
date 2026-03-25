@@ -352,13 +352,13 @@ make help     print this list
 
 - [Neomutt](https://neomutt.org) — the gold standard terminal email client; neomd reuses its screener list format and borrows many keybindings
 - [HEY](https://www.hey.com/features/the-screener/) — the Screener concept: unknown senders wait for a decision before reaching your inbox
-- [hey-cli](https://github.com/sspaeti/hey-cli) — a Go CLI for HEY; provided the bubbletea patterns used here
+- [hey-cli](https://github.com/basecamp/hey-cli) — a Go CLI for HEY; provided the bubbletea patterns used here
 - [newsboat](https://newsboat.org) — RSS reader whose `O` open-in-browser binding and vim navigation feel inspired neomd's reader view
 - [emailmd.dev](https://www.emailmd.dev) — the idea that email should be written in Markdown
 - [charmbracelet/pop](https://github.com/charmbracelet/pop) — minimal Go email sender from Charm
 - [charmbracelet/glamour](https://github.com/charmbracelet/glamour) — Markdown rendering in the terminal
 - [kanagawa.nvim](https://github.com/rebelot/kanagawa.nvim) — the color palette used for the inbox
-- [msgvault](https://github.com/sspaeti/msgvault) — Go IMAP archiver; the IMAP client code in neomd is adapted from it
+- [msgvault](https://github.com/wesm/msgvault) — Go IMAP archiver; the IMAP client code in neomd is adapted from it
 
 ---
 
