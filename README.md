@@ -50,7 +50,7 @@ Compose emails in your editor, read them rendered with [glamour](https://github.
 - **Folder tabs** — Inbox, ToScreen, Feed, PaperTrail, Archive, Waiting, Someday, Scheduled, Sent, Trash, ScreenedOut
 - **Multi-select** — `space` marks emails, then batch-delete, move, or screen them all at once
 - **Kanagawa theme** — colors from the [kanagawa.nvim](https://github.com/rebelot/kanagawa.nvim) palette
-- **IMAP + SMTP** — direct connection via RFC 6851 MOVE, no local sync daemon required
+- **IMAP + SMTP** — direct connection via RFC 6851 MOVE, no local sync daemon required and keeps it in sync if you use it on mobile or different device
 
 ## Install
 
@@ -356,11 +356,11 @@ make help     print this list
 
 ## Inspirations
 
-- [Neomutt](https://neomutt.org) — the gold standard terminal email client; neomd reuses its screener list format and borrows many keybindings
+- [Neomutt](https://neomutt.org) — the gold standard terminal email client; neomd reuses its screener list format and borrows keybindings (though most are [custom made](https://github.com/sspaeti/dotfiles/blob/master/mutt/.config/mutt/muttrc) and what I use)
 - [HEY](https://www.hey.com/features/the-screener/) — the Screener concept: unknown senders wait for a decision before reaching your inbox
 - [hey-cli](https://github.com/basecamp/hey-cli) — a Go CLI for HEY; provided the bubbletea patterns used here
 - [newsboat](https://newsboat.org) — RSS reader whose `O` open-in-browser binding and vim navigation feel inspired neomd's reader view
-- [emailmd.dev](https://www.emailmd.dev) — the idea that email should be written in Markdown
+- [emailmd.dev](https://www.emailmd.dev) — the idea that email should be written in Markdown when seen on [HN](https://news.ycombinator.com/item?id=47505144)
 - [charmbracelet/pop](https://github.com/charmbracelet/pop) — minimal Go email sender from Charm
 - [charmbracelet/glamour](https://github.com/charmbracelet/glamour) — Markdown rendering in the terminal
 - [kanagawa.nvim](https://github.com/rebelot/kanagawa.nvim) — the color palette used for the inbox
