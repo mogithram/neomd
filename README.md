@@ -48,7 +48,9 @@ Compose emails in your editor, read them rendered with [glamour](https://github.
 - **Glamour reading** — incoming emails rendered as styled Markdown in the terminal
 - **HEY-style screener** — unknown senders land in `ToScreen`; press `I/O/F/P` to approve, block, mark as Feed, or mark as PaperTrail; reuses your existing `screened_in.txt` lists from neomutt
 - **Folder tabs** — Inbox, ToScreen, Feed, PaperTrail, Archive, Waiting, Someday, Scheduled, Sent, Trash, ScreenedOut
-- **Multi-select** — `space` marks emails, then batch-delete, move, or screen them all at once
+- **Multi-select** — `m` marks emails, then batch-delete, move, or screen them all at once
+- **Auto-screen on load** — screener runs automatically every time the Inbox loads (startup, `R`); keeps your inbox clean without pressing `S` (configurable, on by default)
+- **Background sync** — while neomd is open, inbox is fetched and screened every 5 minutes in the background; interval configurable, set to `0` to disable
 - **Kanagawa theme** — colors from the [kanagawa.nvim](https://github.com/rebelot/kanagawa.nvim) palette
 - **IMAP + SMTP** — direct connection via RFC 6851 MOVE, no local sync daemon required and keeps it in sync if you use it on mobile or different device
 
@@ -105,8 +107,10 @@ scheduled    = "Scheduled"
 someday      = "Someday"
 
 [ui]
-theme       = "dark"   # dark | light | auto
-inbox_count = 50
+theme                = "dark"   # dark | light | auto
+inbox_count          = 50
+auto_screen_on_load  = true     # screen inbox automatically on every load (default true)
+bg_sync_interval     = 5        # background sync interval in minutes; 0 = disabled (default 5)
 signature   = """**Your Name**
 Your Title, Your Company
 
@@ -201,7 +205,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `U` | clear all marks |
 
 
-### Leader  (space prefix)
+### Leader Key Mappings (space prefix)
 
 | Key | Action |
 |-----|--------|
@@ -226,7 +230,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 
 | Key | Action |
 |-----|--------|
-| `N` | toggle read/unread  (marked or cursor) |
+| `n` | toggle read/unread  (marked or cursor) |
 | `ctrl+n` | mark all in current folder as read |
 | `R` | reload / refresh folder |
 | `r` | reply  (from reader) |
@@ -287,6 +291,23 @@ The screener classifies senders into four buckets using plain-text allowlists. U
 | `feed.txt` | Newsletter / feed | Feed |
 | `papertrail.txt` | Receipts / notifications | PaperTrail |
 | *(not in any list)* | Unknown | ToScreen |
+
+### Auto-screen and background sync
+
+By default neomd screens your inbox automatically so you never have to press `S`:
+
+- **On every inbox load** — when you open neomd or switch to Inbox (or press `R`), the screener classifies all loaded emails in-memory and silently moves them. Your inbox is always clean.
+- **Background sync** — while neomd is running, the inbox is re-fetched and re-screened every 5 minutes. New mail that arrived since you opened neomd is handled automatically.
+
+Both behaviours are configurable in `[ui]`:
+
+```toml
+[ui]
+auto_screen_on_load = true   # set false to disable auto-screen on inbox load
+bg_sync_interval    = 5      # minutes between background syncs; 0 = disabled
+```
+
+`S` / `:screen` still works as a manual dry-run with `y/n` confirmation if you want to preview moves first.
 
 ### Day-to-day: screen new arrivals
 

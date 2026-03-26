@@ -75,6 +75,10 @@ type (
 	batchDoneMsg      struct{ err error }
 	toggleSeenDoneMsg struct{ uid uint32; seen bool; err error }
 	errMsg            struct{ err error }
+	// background sync (runs every bgSyncInterval while neomd is open)
+	bgSyncTickMsg     struct{}
+	bgInboxFetchedMsg struct{ emails []imap.Email }
+	bgScreenDoneMsg   struct{ moved int }
 	editorDoneMsg     struct {
 		to, subject, body string
 		err               error
@@ -209,6 +213,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.fetchFolderCmd(m.activeFolder()),
+		m.scheduleBgSync(),
 	)
 }
 
@@ -426,13 +431,14 @@ func (m Model) batchToggleSeenCmd(emails []imap.Email) tea.Cmd {
 	}
 }
 
-// previewAutoScreen classifies the current inbox emails in-memory (no IMAP)
-// and returns the planned moves without executing anything.
-func (m Model) previewAutoScreen() []autoScreenMove {
+// classifyForScreen classifies a slice of inbox emails in-memory (O(1) map
+// lookups) and returns planned moves. emails must live at least as long as the
+// returned moves (pointers into the slice are stored).
+func (m Model) classifyForScreen(emails []imap.Email) []autoScreenMove {
 	inboxFolder := m.cfg.Folders.Inbox
 	var moves []autoScreenMove
-	for i := range m.emails {
-		e := &m.emails[i]
+	for i := range emails {
+		e := &emails[i]
 		cat := m.screener.Classify(e.From)
 		var dst string
 		switch cat {
@@ -450,6 +456,11 @@ func (m Model) previewAutoScreen() []autoScreenMove {
 		}
 	}
 	return moves
+}
+
+// previewAutoScreen classifies the currently loaded inbox emails (no IMAP).
+func (m Model) previewAutoScreen() []autoScreenMove {
+	return m.classifyForScreen(m.emails)
 }
 
 // deepScreenCmd is phase 1: just UID SEARCH — fast regardless of mailbox size.
@@ -564,6 +575,43 @@ func (m Model) fetchFolderCountsCmd() tea.Cmd {
 	}
 }
 
+// scheduleBgSync returns a Cmd that fires bgSyncTickMsg after the configured
+// interval. Returns nil (no-op) when bg_sync_interval = 0 (disabled).
+func (m Model) scheduleBgSync() tea.Cmd {
+	mins := m.cfg.UI.BgSyncInterval
+	if mins <= 0 {
+		return nil
+	}
+	return tea.Tick(time.Duration(mins)*time.Minute, func(time.Time) tea.Msg { return bgSyncTickMsg{} })
+}
+
+// bgFetchInboxCmd silently fetches inbox headers for background screening.
+// Errors are swallowed — a transient network hiccup shouldn't disrupt the UI.
+func (m Model) bgFetchInboxCmd() tea.Cmd {
+	return func() tea.Msg {
+		emails, err := m.imapCli().FetchHeaders(nil, m.cfg.Folders.Inbox, m.cfg.UI.InboxCount)
+		if err != nil {
+			return bgSyncTickMsg{} // reschedule retry on next tick instead of errMsg
+		}
+		return bgInboxFetchedMsg{emails: emails}
+	}
+}
+
+// bgExecAutoScreenCmd silently moves emails and returns bgScreenDoneMsg.
+func (m Model) bgExecAutoScreenCmd(moves []autoScreenMove) tea.Cmd {
+	src := m.cfg.Folders.Inbox
+	return func() tea.Msg {
+		moved := 0
+		for _, mv := range moves {
+			if err := m.imapCli().MoveMessage(nil, src, mv.email.UID, mv.dst); err != nil {
+				break
+			}
+			moved++
+		}
+		return bgScreenDoneMsg{moved: moved}
+	}
+}
+
 // execAutoScreenCmd performs the IMAP moves for a pre-approved list of moves.
 func (m Model) execAutoScreenCmd(moves []autoScreenMove) tea.Cmd {
 	src := m.cfg.Folders.Inbox
@@ -643,7 +691,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Auto-screen: silently apply screener moves on every inbox load.
 		// In-memory classification is instant; already-screened senders won't
 		// appear in inbox again so this is idempotent.
-		if msg.folder == m.cfg.Folders.Inbox {
+		// Controlled by ui.auto_screen_on_load (default true).
+		if msg.folder == m.cfg.Folders.Inbox && m.cfg.UI.AutoScreen() {
 			if moves := m.previewAutoScreen(); len(moves) > 0 {
 				m.loading = true
 				return m, tea.Batch(sortCmd, m.fetchFolderCountsCmd(), m.spinner.Tick, m.execAutoScreenCmd(moves))
@@ -850,6 +899,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isError = false
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
+
+	case bgSyncTickMsg:
+		// Fire background inbox fetch; reschedule next tick in parallel.
+		return m, tea.Batch(m.bgFetchInboxCmd(), m.scheduleBgSync())
+
+	case bgInboxFetchedMsg:
+		moves := m.classifyForScreen(msg.emails)
+		if len(moves) == 0 {
+			return m, nil
+		}
+		return m, m.bgExecAutoScreenCmd(moves)
+
+	case bgScreenDoneMsg:
+		if msg.moved > 0 {
+			// Refresh the visible folder so the user sees the clean result.
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
+		}
+		return m, nil
 
 	case errMsg:
 		m.loading = false
@@ -1104,6 +1172,20 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "Cancelled."
 			return m, nil
 		}
+		// No pending confirmation — toggle read/unread
+		targets := m.targetEmails()
+		if len(targets) == 0 {
+			break
+		}
+		if len(targets) == 1 && len(m.markedUIDs) == 0 {
+			next := m.inbox.Index() + 1
+			if next < len(m.inbox.Items()) {
+				m.inbox.Select(next)
+			}
+			return m, m.toggleSeenCmd(&targets[0])
+		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.batchToggleSeenCmd(targets))
 
 	// ── Navigation ──────────────────────────────────────────────────
 	case "tab", "L":
@@ -1175,21 +1257,6 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, setEmails(&m.inbox, m.emails, m.markedUIDs)
 
-	case "N": // toggle read/unread on marked emails (or cursor email)
-		targets := m.targetEmails()
-		if len(targets) == 0 {
-			break
-		}
-		if len(targets) == 1 && len(m.markedUIDs) == 0 {
-			// single optimistic update — no reload needed
-			next := m.inbox.Index() + 1
-			if next < len(m.inbox.Items()) {
-				m.inbox.Select(next)
-			}
-			return m, m.toggleSeenCmd(&targets[0])
-		}
-		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.batchToggleSeenCmd(targets))
 	}
 
 	// Forward remaining keys (j/k navigation, filter /) to list

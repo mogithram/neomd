@@ -47,9 +47,19 @@ type FoldersConfig struct {
 
 // UIConfig holds display preferences.
 type UIConfig struct {
-	Theme      string `toml:"theme"`       // dark | light | auto
-	InboxCount int    `toml:"inbox_count"` // number of messages to fetch
-	Signature  string `toml:"signature"`   // appended to new compose buffers (markdown)
+	Theme             string `toml:"theme"`               // dark | light | auto
+	InboxCount        int    `toml:"inbox_count"`         // number of messages to fetch
+	Signature         string `toml:"signature"`           // appended to new compose buffers (markdown)
+	AutoScreenOnLoad  *bool  `toml:"auto_screen_on_load"` // screen inbox on every load (default true)
+	BgSyncInterval    int    `toml:"bg_sync_interval"`    // background sync interval in minutes (0 = disabled, default 5)
+}
+
+// AutoScreen returns true if auto-screen-on-inbox-load is enabled (default: true).
+func (u UIConfig) AutoScreen() bool {
+	if u.AutoScreenOnLoad == nil {
+		return true
+	}
+	return *u.AutoScreenOnLoad
 }
 
 // Config is the root neomd configuration.
@@ -150,8 +160,9 @@ func defaults() *Config {
 			Someday:     "Someday",
 		},
 		UI: UIConfig{
-			Theme:      "dark",
-			InboxCount: 50,
+			Theme:          "dark",
+			InboxCount:     50,
+			BgSyncInterval: 5,
 		},
 	}
 }

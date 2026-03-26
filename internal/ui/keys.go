@@ -53,7 +53,6 @@ var HelpSections = []HelpSection{
 	}},
 	{"Multi-select", [][2]string{
 		{"m", "mark / unmark email + advance cursor"},
-		{"n", "mark / unmark email + advance cursor"},
 		{"U", "clear all marks"},
 	}},
 	{"Leader Key Mappings (space prefix)", [][2]string{
@@ -70,7 +69,7 @@ var HelpSections = []HelpSection{
 		{",N", "subject Z→A"},
 	}},
 	{"Email actions", [][2]string{
-		{"N", "toggle read/unread  (marked or cursor)"},
+		{"n", "toggle read/unread  (marked or cursor)"},
 		{"ctrl+n", "mark all in current folder as read"},
 		{"R", "reload / refresh folder"},
 		{"r", "reply  (from reader)"},
