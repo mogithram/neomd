@@ -1638,6 +1638,10 @@ func (m Model) openWebVersion() (tea.Model, tea.Cmd) {
 		m.status = "No web version link found in this email."
 		return m, nil
 	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		m.status = "Blocked: URL has unsafe scheme."
+		return m, nil
+	}
 
 	browser := os.Getenv("BROWSER")
 	if browser == "" {

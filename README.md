@@ -123,6 +123,8 @@ Connect: [LinkedIn](https://example.com/)"""
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.
 
+Credentials are stored only in `~/.config/neomd/config.toml` (mode 0600) and never written elsewhere; all IMAP connections use TLS (port 993) or STARTTLS (port 143).
+
 ### Email Sending
 
 #### Sending and Discard email
@@ -392,6 +394,10 @@ make help     print this list
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how credentials, screener lists, temp files, and network connections are handled — with links to the relevant source files.
 
 ## Inspirations
 

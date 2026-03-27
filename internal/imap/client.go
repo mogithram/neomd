@@ -80,7 +80,7 @@ func (c *Client) connect(_ context.Context) error {
 	case c.cfg.STARTTLS:
 		conn, err = imapclient.DialStartTLS(addr, opts)
 	default:
-		conn, err = imapclient.DialInsecure(addr, opts)
+		return fmt.Errorf("refusing unencrypted connection to %s — use port 993 (TLS) or 143 (STARTTLS)", addr)
 	}
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", addr, err)
