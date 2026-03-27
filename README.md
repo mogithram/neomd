@@ -4,12 +4,24 @@ A minimal terminal email client for people who write in Markdown and live in Neo
 
 [Neomd](https://www.ssp.sh/brain/neomd/) is my way of implementing an email TUI based on my experience with Neomutt, focusing on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing in [Markdown](https://www.ssp.sh/brain/markdown) and navigating with [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions) with the GTD workflow and [HEY-Screener](https://www.hey.com/features/the-screener/).
 
+## The philosophy behind Neomd: What's unique?
+
+The key here is **speed** in which you can **navigate, read, and process** your email. Everything is just a shortcut away, and instantly (ms not seconds). It's similar to the foundations that Superhuman was built on: it runs on Gmail and makes it fast with vim commands.
+
+With the **HEY-Screener**, you get only emails in your inbox that you _screened in_, no spam or sales pitch before you added them. Or don't like them, just screen them out, and they get automatically moved to the "ScreenedOut" folder.
+
+With the [GTD approach](https://www.ssp.sh/brain/getting-things-done-gtd), using folders such as next (inbox), waiting, someday, scheduled, or archive, you can move them with one shortcut. This allows you quickly to move emails you need to wait for, or deal with later, in the right category. **Processing your email only once**.
+
+With the additional **Feed** and **Papertrail**, two additional features from HEY, you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
 ## Screenshots
+
 ### Overview
+
 Feed view with all Newsletters - also workflow with differnt tabs and unread counter only for certain tabs (not all):
 ![neomd](images/overview-email-feed.png)
 
 ### Reading Panel
+
 Reading an email with Markdown 💙:
 
 ![neomd](images/reading-email.png)
@@ -29,18 +41,19 @@ This is the markdown sent:
 
 This email is from Neomd. Great I can add links such as [this](https://ssp.sh) with plain Markdown.
 
-E.g. **bold** or *italic*. 
+E.g. **bold** or _italic_.
 
 ## Does headers work too?
 
 this is a text before a h3.
+
 ### H3 header
+
 how does that look in an email?
 Best regards
 ```
 
-
-Compose emails in your editor, read them rendered with [glamour](https://github.com/charmbracelet/glamour), and manage your inbox with a [HEY-style screener](https://www.hey.com/features/the-screener/) — all from the terminal. 
+Compose emails in your editor, read them rendered with [glamour](https://github.com/charmbracelet/glamour), and manage your inbox with a [HEY-style screener](https://www.hey.com/features/the-screener/) — all from the terminal.
 
 ## Features
 
@@ -128,8 +141,8 @@ Credentials are stored only in `~/.config/neomd/config.toml` (mode 0600) and nev
 ### Email Sending
 
 #### Sending and Discard email
-To abort a compose without sending, close neovim with `ZQ` or `:q!` (discard). To send, save normally with `ZZ` or `:wq`.
 
+To abort a compose without sending, close neovim with `ZQ` or `:q!` (discard). To send, save normally with `ZZ` or `:wq`.
 
 #### Signature
 
@@ -148,141 +161,131 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 
 ### Navigation
 
-| Key | Action |
-|-----|--------|
-| `j / k` | move down / up |
-| `gg` | jump to top |
-| `G` | jump to bottom |
-| `enter / l` | open email |
-| `h / q / esc` | back to inbox (from reader) |
-| `?` | toggle help overlay (type to filter) |
-
+| Key           | Action                               |
+| ------------- | ------------------------------------ |
+| `j / k`       | move down / up                       |
+| `gg`          | jump to top                          |
+| `G`           | jump to bottom                       |
+| `enter / l`   | open email                           |
+| `h / q / esc` | back to inbox (from reader)          |
+| `?`           | toggle help overlay (type to filter) |
 
 ### Folders
 
-| Key | Action |
-|-----|--------|
-| `L / tab` | next folder tab |
-| `H / shift+tab` | previous folder tab |
-| `gi` | go to Inbox |
-| `ga` | go to Archive |
-| `gf` | go to Feed |
-| `gp` | go to PaperTrail |
-| `gt` | go to Trash |
-| `gs` | go to Sent |
-| `gk` | go to ToScreen |
-| `go` | go to ScreenedOut |
-| `gw` | go to Waiting |
-| `gm` | go to Someday |
-| `gd` | go to Drafts (read-only; save-to-draft not yet implemented) |
-| `gS` | go to Spam (not in tab rotation) |
+| Key             | Action                                                      |
+| --------------- | ----------------------------------------------------------- |
+| `L / tab`       | next folder tab                                             |
+| `H / shift+tab` | previous folder tab                                         |
+| `gi`            | go to Inbox                                                 |
+| `ga`            | go to Archive                                               |
+| `gf`            | go to Feed                                                  |
+| `gp`            | go to PaperTrail                                            |
+| `gt`            | go to Trash                                                 |
+| `gs`            | go to Sent                                                  |
+| `gk`            | go to ToScreen                                              |
+| `go`            | go to ScreenedOut                                           |
+| `gw`            | go to Waiting                                               |
+| `gm`            | go to Someday                                               |
+| `gd`            | go to Drafts (read-only; save-to-draft not yet implemented) |
+| `gS`            | go to Spam (not in tab rotation)                            |
 
+### Screener (marked or cursor, any folder)
 
-### Screener  (marked or cursor, any folder)
-
-| Key | Action |
-|-----|--------|
-| `I` | approve sender → screened_in.txt + move to Inbox (removes from blocked lists) |
+| Key | Action                                                                           |
+| --- | -------------------------------------------------------------------------------- |
+| `I` | approve sender → screened_in.txt + move to Inbox (removes from blocked lists)    |
 | `O` | block sender → screened_out.txt + move to ScreenedOut (removes from screened_in) |
-| `$` | mark as Spam → spam.txt + move to Spam (removes from screened_in/out) |
-| `F` | mark as Feed → feed.txt + move to Feed |
-| `P` | mark as PaperTrail → papertrail.txt + move to PaperTrail |
-| `A` | archive (move to Archive, no screener update) |
-| `S` | dry-run screen inbox (loaded emails), then y/n |
+| `$` | mark as Spam → spam.txt + move to Spam (removes from screened_in/out)            |
+| `F` | mark as Feed → feed.txt + move to Feed                                           |
+| `P` | mark as PaperTrail → papertrail.txt + move to PaperTrail                         |
+| `A` | archive (move to Archive, no screener update)                                    |
+| `S` | dry-run screen inbox (loaded emails), then y/n                                   |
 
+### Move (marked or cursor, no screener update)
 
-### Move  (marked or cursor, no screener update)
-
-| Key | Action |
-|-----|--------|
-| `x` | delete → Trash |
-| `Mi` | move to Inbox |
-| `Ma` | move to Archive |
-| `Mf` | move to Feed |
-| `Mp` | move to PaperTrail |
-| `Mt` | move to Trash |
+| Key  | Action              |
+| ---- | ------------------- |
+| `x`  | delete → Trash      |
+| `Mi` | move to Inbox       |
+| `Ma` | move to Archive     |
+| `Mf` | move to Feed        |
+| `Mp` | move to PaperTrail  |
+| `Mt` | move to Trash       |
 | `Mo` | move to ScreenedOut |
-| `Mw` | move to Waiting |
-| `Mm` | move to Someday |
-
+| `Mw` | move to Waiting     |
+| `Mm` | move to Someday     |
 
 ### Multi-select
 
-| Key | Action |
-|-----|--------|
+| Key | Action                               |
+| --- | ------------------------------------ |
 | `m` | mark / unmark email + advance cursor |
-| `U` | clear all marks |
-
+| `U` | clear all marks                      |
 
 ### Leader Key Mappings (space prefix)
 
-| Key | Action |
-|-----|--------|
+| Key                   | Action                                                |
+| --------------------- | ----------------------------------------------------- |
 | `<space>1 … <space>9` | jump to folder tab by number (Inbox=1, ToScreen=2, …) |
 
+### Sort (, prefix)
 
-### Sort  (, prefix)
-
-| Key | Action |
-|-----|--------|
+| Key  | Action                      |
+| ---- | --------------------------- |
 | `,m` | date newest first (default) |
-| `,M` | date oldest first |
-| `,a` | from A→Z |
-| `,A` | from Z→A |
-| `,s` | size smallest first |
-| `,S` | size largest first |
-| `,n` | subject A→Z |
-| `,N` | subject Z→A |
-
+| `,M` | date oldest first           |
+| `,a` | from A→Z                    |
+| `,A` | from Z→A                    |
+| `,s` | size smallest first         |
+| `,S` | size largest first          |
+| `,n` | subject A→Z                 |
+| `,N` | subject Z→A                 |
 
 ### Email actions
 
-| Key | Action |
-|-----|--------|
-| `n` | toggle read/unread  (marked or cursor) |
-| `ctrl+n` | mark all in current folder as read |
-| `R` | reload / refresh folder |
-| `r` | reply  (from reader) |
-| `c` | compose new email |
-| `e  (reader)` | open in $EDITOR read-only — search, copy, vim motions |
-| `o  (reader)` | open in w3m (terminal browser) |
-| `O  (reader)` | open in $BROWSER (GUI browser, images shown) |
-| `ctrl+o  (reader)` | open web version / newsletter URL in $BROWSER |
-| `ctrl+a` | switch account  (if multiple configured) |
+| Key                | Action                                                |
+| ------------------ | ----------------------------------------------------- |
+| `n`                | toggle read/unread (marked or cursor)                 |
+| `ctrl+n`           | mark all in current folder as read                    |
+| `R`                | reload / refresh folder                               |
+| `r`                | reply (from reader)                                   |
+| `c`                | compose new email                                     |
+| `e  (reader)`      | open in $EDITOR read-only — search, copy, vim motions |
+| `o  (reader)`      | open in w3m (terminal browser)                        |
+| `O  (reader)`      | open in $BROWSER (GUI browser, images shown)          |
+| `ctrl+o  (reader)` | open web version / newsletter URL in $BROWSER         |
+| `ctrl+a`           | switch account (if multiple configured)               |
 
+### Command line (: to open, tab to complete)
 
-### Command line  (: to open, tab to complete)
-
-| Key | Action |
-|-----|--------|
-| `:screen  / :s` | dry-run screen loaded inbox emails |
-| `:screen-all  / :sa` | dry-run screen ALL inbox emails (no limit) |
-| `:reset-toscreen  / :rts` | move all ToScreen emails back to Inbox |
-| `:mark-read  / :mr` | mark all emails in current folder as read |
-| `:reload  / :r` | reload current folder |
-| `:check  / :ch` | show screener classification for selected email |
-| `:delete-all  / :da` | permanently delete ALL emails in current folder (y/n) |
-| `:create-folders  / :cf` | create missing IMAP folders from config (safe, idempotent) |
-| `:go-spam  / :spam` | open Spam folder (not in tab rotation) |
-| `:quit  / :q` | quit neomd |
-
+| Key                       | Action                                                     |
+| ------------------------- | ---------------------------------------------------------- |
+| `:screen  / :s`           | dry-run screen loaded inbox emails                         |
+| `:screen-all  / :sa`      | dry-run screen ALL inbox emails (no limit)                 |
+| `:reset-toscreen  / :rts` | move all ToScreen emails back to Inbox                     |
+| `:mark-read  / :mr`       | mark all emails in current folder as read                  |
+| `:reload  / :r`           | reload current folder                                      |
+| `:check  / :ch`           | show screener classification for selected email            |
+| `:delete-all  / :da`      | permanently delete ALL emails in current folder (y/n)      |
+| `:create-folders  / :cf`  | create missing IMAP folders from config (safe, idempotent) |
+| `:go-spam  / :spam`       | open Spam folder (not in tab rotation)                     |
+| `:quit  / :q`             | quit neomd                                                 |
 
 ### Composing
 
-| Key | Action |
-|-----|--------|
-| `tab / enter` | move to next field |
+| Key                   | Action                            |
+| --------------------- | --------------------------------- |
+| `tab / enter`         | move to next field                |
 | `enter  (on Subject)` | open $EDITOR with a .md temp file |
-| `esc` | cancel |
-
+| `esc`                 | cancel                            |
 
 ### General
 
-| Key | Action |
-|-----|--------|
+| Key | Action                          |
+| --- | ------------------------------- |
 | `/` | filter emails in current folder |
-| `?` | toggle this help |
-| `q` | quit  (from inbox) |
+| `?` | toggle this help                |
+| `q` | quit (from inbox)               |
 
 <!-- keybindings-end -->
 
@@ -294,13 +297,13 @@ The screener classifies senders into four buckets using plain-text allowlists. U
 
 ### How classification works
 
-| List file | Category | Where email lands |
-|-----------|----------|-------------------|
-| `screened_in.txt` | Approved | stays in Inbox |
-| `screened_out.txt` | Blocked | ScreenedOut |
-| `feed.txt` | Newsletter / feed | Feed |
-| `papertrail.txt` | Receipts / notifications | PaperTrail |
-| *(not in any list)* | Unknown | ToScreen |
+| List file           | Category                 | Where email lands |
+| ------------------- | ------------------------ | ----------------- |
+| `screened_in.txt`   | Approved                 | stays in Inbox    |
+| `screened_out.txt`  | Blocked                  | ScreenedOut       |
+| `feed.txt`          | Newsletter / feed        | Feed              |
+| `papertrail.txt`    | Receipts / notifications | PaperTrail        |
+| _(not in any list)_ | Unknown                  | ToScreen          |
 
 ### Auto-screen and background sync
 
@@ -345,13 +348,13 @@ When you add many senders to `feed.txt` or `papertrail.txt` at once (e.g. after 
 
 Press `:` to open the command line. Tab cycles through completions; Enter runs the command.
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `:screen` | `:s` | dry-run screen currently loaded Inbox emails |
-| `:screen-all` | `:sa` | dry-run screen **every** Inbox email (no count limit) |
-| `:reset-toscreen` | `:rts` | move all ToScreen emails back to Inbox |
-| `:reload` | `:r` | reload the current folder |
-| `:quit` | `:q` | quit neomd |
+| Command           | Alias  | Description                                           |
+| ----------------- | ------ | ----------------------------------------------------- |
+| `:screen`         | `:s`   | dry-run screen currently loaded Inbox emails          |
+| `:screen-all`     | `:sa`  | dry-run screen **every** Inbox email (no count limit) |
+| `:reset-toscreen` | `:rts` | move all ToScreen emails back to Inbox                |
+| `:reload`         | `:r`   | reload the current folder                             |
+| `:quit`           | `:q`   | quit neomd                                            |
 
 ## Images
 
@@ -391,7 +394,6 @@ make help     print this list
 - [goldmark](https://github.com/yuin/goldmark) — Markdown → HTML for sending
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) — config parsing
 
-
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new.
@@ -414,7 +416,7 @@ See [SECURITY.md](SECURITY.md) for how credentials, screener lists, temp files, 
 
 ---
 
-This TUI is mostly [vibe coded](https://www.ssp.sh/brain/vibe-coding), but I used my experience with neomutt, TUIs and workflow of handling emails with GTD with HEY Screener, and added some (hopefully) *taste* using my favorite tools and astetics. Find the full history at [Twitter](https://xcancel.com/sspaeti/status/2036539855182627169#m) - inspired by seeing [Email.md](https://www.emailmd.dev/) on HackerNews.
+This TUI is mostly [vibe coded](https://www.ssp.sh/brain/vibe-coding), but I used my experience with neomutt, TUIs and workflow of handling emails with GTD with HEY Screener, and added some (hopefully) _taste_ using my favorite tools and astetics. Find the full history at [Twitter](https://xcancel.com/sspaeti/status/2036539855182627169#m) - inspired by seeing [Email.md](https://www.emailmd.dev/) on HackerNews.
 
 If you [rather read the prompt](https://www.ssp.sh/brain/id-rather-read-the-prompt), check out my [initial prompt](_prompts/prompt.md) and its generated [plan](_prompts/prompt-plan.md) by Claude Code.
 
