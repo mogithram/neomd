@@ -94,6 +94,7 @@ papertrail   = "~/.dotfiles/neomd/.lists/papertrail.txt"
 spam         = "~/.dotfiles/neomd/.lists/spam.txt"
 
 [folders]
+# reorder folders below to also change order shown in tabs in neomd
 inbox        = "INBOX"
 sent         = "Sent"
 trash        = "Trash"

@@ -186,7 +186,7 @@ func New(cfg *config.Config, clients []*imap.Client, sc *screener.Screener) Mode
 		screener:    sc,
 		state:       stateInbox,
 		loading:     true,
-		folders:     []string{"Inbox", "ToScreen", "Feed", "PaperTrail", "Archive", "Waiting", "Someday", "Scheduled", "Sent", "Trash", "ScreenedOut"},
+		folders:     cfg.Folders.TabLabels(),
 		cmdHistory:  loadCmdHistory(config.HistoryPath()),
 		cmdHistI:    -1,
 		// Note: Spam is intentionally excluded from tabs — use :go-spam to visit.

@@ -45,6 +45,48 @@ type FoldersConfig struct {
 	Scheduled   string `toml:"scheduled"`
 	Someday     string `toml:"someday"`
 	Spam        string `toml:"spam"`
+	// TabOrder lists folder keys (e.g. "inbox", "to_screen") in the desired
+	// tab display order. Spam is always excluded from tabs regardless of order.
+	// If empty, the built-in default order is used.
+	TabOrder []string `toml:"tab_order"`
+}
+
+// defaultTabOrder is the built-in tab order when tab_order is not configured.
+var defaultTabOrder = []string{"inbox", "to_screen", "feed", "papertrail", "waiting", "someday", "scheduled", "sent", "archive", "screened_out", "drafts", "trash"}
+
+// keyToLabel maps config key names to the internal label names used by the UI.
+// These labels are what m.folders stores and what activeFolder() matches against.
+var keyToLabel = map[string]string{
+	"inbox":        "Inbox",
+	"sent":         "Sent",
+	"trash":        "Trash",
+	"drafts":       "Drafts",
+	"to_screen":    "ToScreen",
+	"feed":         "Feed",
+	"papertrail":   "PaperTrail",
+	"screened_out": "ScreenedOut",
+	"archive":      "Archive",
+	"waiting":      "Waiting",
+	"scheduled":    "Scheduled",
+	"someday":      "Someday",
+}
+
+// TabLabels returns the UI label names in tab display order.
+// tab_order keys (e.g. "inbox", "to_screen") are resolved to label names
+// (e.g. "Inbox", "ToScreen") that activeFolder() and keyboard shortcuts match against.
+// Spam is excluded — it is never shown as a tab.
+func (f FoldersConfig) TabLabels() []string {
+	keys := f.TabOrder
+	if len(keys) == 0 {
+		keys = defaultTabOrder
+	}
+	tabs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if label, ok := keyToLabel[k]; ok {
+			tabs = append(tabs, label)
+		}
+	}
+	return tabs
 }
 
 // UIConfig holds display preferences.
