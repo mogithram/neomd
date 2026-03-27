@@ -114,6 +114,16 @@ func init() {
 			},
 		},
 		{
+			name:    "go-spam",
+			aliases: []string{"spam"},
+			desc:    "open Spam folder (not in tab rotation — use :go-spam to visit)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				m.status = "Spam folder — press R to reload, tab to leave"
+				return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Spam))
+			},
+		},
+		{
 			name:    "quit",
 			aliases: []string{"q"},
 			desc:    "quit neomd",

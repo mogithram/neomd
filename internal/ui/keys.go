@@ -31,10 +31,12 @@ var HelpSections = []HelpSection{
 		{"go", "go to ScreenedOut"},
 		{"gw", "go to Waiting"},
 		{"gm", "go to Someday"},
+		{"gS", "go to Spam (not in tab rotation)"},
 	}},
 	{"Screener  (marked or cursor, any folder)", [][2]string{
-		{"I", "approve sender → screened_in.txt + move to Inbox"},
-		{"O", "block sender → screened_out.txt + move to ScreenedOut"},
+		{"I", "approve sender → screened_in.txt + move to Inbox (removes from blocked lists)"},
+		{"O", "block sender → screened_out.txt + move to ScreenedOut (removes from screened_in)"},
+		{"$", "mark as Spam → spam.txt + move to Spam (removes from screened_in/out)"},
 		{"F", "mark as Feed → feed.txt + move to Feed"},
 		{"P", "mark as PaperTrail → papertrail.txt + move to PaperTrail"},
 		{"A", "archive (move to Archive, no screener update)"},
@@ -89,6 +91,7 @@ var HelpSections = []HelpSection{
 		{":check  / :ch", "show screener classification for selected email"},
 		{":delete-all  / :da", "permanently delete ALL emails in current folder (y/n)"},
 		{":create-folders  / :cf", "create missing IMAP folders from config (safe, idempotent)"},
+		{":go-spam  / :spam", "open Spam folder (not in tab rotation)"},
 		{":quit  / :q", "quit neomd"},
 	}},
 	{"Composing", [][2]string{

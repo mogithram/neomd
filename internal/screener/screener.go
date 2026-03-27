@@ -17,9 +17,10 @@ type Category int
 const (
 	CategoryToScreen  Category = iota // unknown — awaiting decision
 	CategoryInbox                     // approved sender
-	CategoryScreenedOut               // blocked
+	CategoryScreenedOut               // blocked (known human/company)
 	CategoryFeed                      // newsletter / feed
 	CategoryPaperTrail                // receipts / notifications
+	CategorySpam                      // actual spam — never needs review
 )
 
 func (c Category) String() string {
@@ -32,6 +33,8 @@ func (c Category) String() string {
 		return "Feed"
 	case CategoryPaperTrail:
 		return "PaperTrail"
+	case CategorySpam:
+		return "Spam"
 	default:
 		return "ToScreen"
 	}
@@ -43,6 +46,7 @@ type Config struct {
 	ScreenedOut string
 	Feed        string
 	PaperTrail  string
+	Spam        string
 }
 
 // Screener holds loaded allowlists in memory for fast classification.
@@ -52,9 +56,10 @@ type Screener struct {
 	screenedOut map[string]bool
 	feed        map[string]bool
 	paperTrail  map[string]bool
+	spam        map[string]bool
 }
 
-// New loads all four lists from the paths in cfg.
+// New loads all lists from the paths in cfg.
 // Missing files are silently skipped (treated as empty).
 func New(cfg Config) (*Screener, error) {
 	s := &Screener{
@@ -63,12 +68,14 @@ func New(cfg Config) (*Screener, error) {
 		screenedOut: make(map[string]bool),
 		feed:        make(map[string]bool),
 		paperTrail:  make(map[string]bool),
+		spam:        make(map[string]bool),
 	}
 	for path, m := range map[string]map[string]bool{
 		cfg.ScreenedIn:  s.screenedIn,
 		cfg.ScreenedOut: s.screenedOut,
 		cfg.Feed:        s.feed,
 		cfg.PaperTrail:  s.paperTrail,
+		cfg.Spam:        s.spam,
 	} {
 		if err := loadList(path, m); err != nil {
 			return nil, fmt.Errorf("load screener list %s: %w", path, err)
@@ -82,8 +89,10 @@ func New(cfg Config) (*Screener, error) {
 func (s *Screener) Classify(from string) Category {
 	addr := normalise(from)
 	switch {
+	case s.spam[addr]:
+		return CategorySpam // spam wins over everything
 	case s.screenedOut[addr]:
-		return CategoryScreenedOut // hard block always wins
+		return CategoryScreenedOut // hard block
 	case s.feed[addr]:
 		return CategoryFeed // specific routing beats generic approval
 	case s.paperTrail[addr]:
@@ -102,14 +111,25 @@ func (s *Screener) ClassifyDebug(from string) (Category, string) {
 	return s.Classify(from), addr
 }
 
-// Approve adds addr to screened_in.txt and updates the in-memory set.
+// Approve adds addr to screened_in.txt and removes it from screened_out/spam.
 func (s *Screener) Approve(from string) error {
+	_ = s.removeFromList(s.cfg.ScreenedOut, s.screenedOut, from)
+	_ = s.removeFromList(s.cfg.Spam, s.spam, from)
 	return s.addToList(s.cfg.ScreenedIn, s.screenedIn, from)
 }
 
-// Block adds addr to screened_out.txt and updates the in-memory set.
+// Block adds addr to screened_out.txt and removes it from screened_in/spam.
 func (s *Screener) Block(from string) error {
+	_ = s.removeFromList(s.cfg.ScreenedIn, s.screenedIn, from)
+	_ = s.removeFromList(s.cfg.Spam, s.spam, from)
 	return s.addToList(s.cfg.ScreenedOut, s.screenedOut, from)
+}
+
+// MarkSpam adds addr to spam.txt and removes it from screened_in/screened_out.
+func (s *Screener) MarkSpam(from string) error {
+	_ = s.removeFromList(s.cfg.ScreenedIn, s.screenedIn, from)
+	_ = s.removeFromList(s.cfg.ScreenedOut, s.screenedOut, from)
+	return s.addToList(s.cfg.Spam, s.spam, from)
 }
 
 // MarkFeed adds addr to feed.txt and updates the in-memory set.
@@ -120,6 +140,43 @@ func (s *Screener) MarkFeed(from string) error {
 // MarkPaperTrail adds addr to papertrail.txt and updates the in-memory set.
 func (s *Screener) MarkPaperTrail(from string) error {
 	return s.addToList(s.cfg.PaperTrail, s.paperTrail, from)
+}
+
+// removeFromList deletes addr from the file and in-memory set if present.
+func (s *Screener) removeFromList(path string, m map[string]bool, from string) error {
+	addr := normalise(from)
+	if !m[addr] {
+		return nil // not in list, nothing to do
+	}
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		delete(m, addr)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var keep []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if normalise(line) != addr {
+			keep = append(keep, line)
+		}
+	}
+	f.Close()
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	content := ""
+	if len(keep) > 0 {
+		content = strings.Join(keep, "\n") + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	delete(m, addr)
+	return nil
 }
 
 func (s *Screener) addToList(path string, m map[string]bool, from string) error {

@@ -27,6 +27,7 @@ type ScreenerConfig struct {
 	ScreenedOut string `toml:"screened_out"`
 	Feed        string `toml:"feed"`
 	PaperTrail  string `toml:"papertrail"`
+	Spam        string `toml:"spam"`
 }
 
 // FoldersConfig maps logical names to actual IMAP mailbox names.
@@ -43,6 +44,7 @@ type FoldersConfig struct {
 	Waiting     string `toml:"waiting"`
 	Scheduled   string `toml:"scheduled"`
 	Someday     string `toml:"someday"`
+	Spam        string `toml:"spam"`
 }
 
 // UIConfig holds display preferences.
@@ -92,6 +94,19 @@ func DefaultPath() string {
 	return filepath.Join(home, ".config", "neomd", "config.toml")
 }
 
+// HistoryPath returns the path for the command history file.
+// Uses the OS cache directory (~/.cache/neomd/ on Linux) so it is never
+// picked up by dotfile version control but still persists across reboots.
+func HistoryPath() string {
+	if dir, err := os.UserCacheDir(); err == nil {
+		p := filepath.Join(dir, "neomd")
+		_ = os.MkdirAll(p, 0700)
+		return filepath.Join(p, "cmd_history")
+	}
+	// Fallback: system temp dir with a user-scoped name
+	return filepath.Join(os.TempDir(), fmt.Sprintf("neomd_%d_cmd_history", os.Getuid()))
+}
+
 // Load reads config from path (or default location if path is empty).
 // If no config exists, returns a placeholder config and prints a hint.
 func Load(path string) (*Config, error) {
@@ -117,6 +132,7 @@ func Load(path string) (*Config, error) {
 	cfg.Screener.ScreenedOut = expandPath(cfg.Screener.ScreenedOut)
 	cfg.Screener.Feed = expandPath(cfg.Screener.Feed)
 	cfg.Screener.PaperTrail = expandPath(cfg.Screener.PaperTrail)
+	cfg.Screener.Spam = expandPath(cfg.Screener.Spam)
 
 	for i := range cfg.Accounts {
 		cfg.Accounts[i].Password = expandEnv(cfg.Accounts[i].Password)
@@ -144,6 +160,7 @@ func defaults() *Config {
 			ScreenedOut: filepath.Join(muttDir, "screened_out.txt"),
 			Feed:        filepath.Join(muttDir, "feed.txt"),
 			PaperTrail:  filepath.Join(muttDir, "papertrail.txt"),
+			Spam:        filepath.Join(muttDir, "spam.txt"),
 		},
 		Folders: FoldersConfig{
 			Inbox:       "INBOX",
@@ -158,6 +175,7 @@ func defaults() *Config {
 			Waiting:     "Waiting",
 			Scheduled:   "Scheduled",
 			Someday:     "Someday",
+			Spam:        "Spam",
 		},
 		UI: UIConfig{
 			Theme:          "dark",

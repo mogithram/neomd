@@ -87,10 +87,11 @@ from     = "Me <me@example.com>"
 
 [screener]
 # reuse your existing neomutt allowlist files
-screened_in  = "~/.dotfiles/mutt/.lists/screened_in.txt"
-screened_out = "~/.dotfiles/mutt/.lists/screened_out.txt"
-feed         = "~/.dotfiles/mutt/.lists/feed.txt"
-papertrail   = "~/.dotfiles/mutt/.lists/papertrail.txt"
+screened_in  = "~/.dotfiles/neomd/.lists/screened_in.txt"
+screened_out = "~/.dotfiles/neomd/.lists/screened_out.txt"
+feed         = "~/.dotfiles/neomd/.lists/feed.txt"
+papertrail   = "~/.dotfiles/neomd/.lists/papertrail.txt"
+spam         = "~/.dotfiles/neomd/.lists/spam.txt"
 
 [folders]
 inbox        = "INBOX"
@@ -105,6 +106,7 @@ archive      = "Archive"
 waiting      = "Waiting"
 scheduled    = "Scheduled"
 someday      = "Someday"
+spam         = "spam" #check capitalization of your pre-existing Spam folder, sometimes might be `Spam` with `S`
 
 [ui]
 theme                = "dark"   # dark | light | auto
@@ -168,14 +170,16 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `go` | go to ScreenedOut |
 | `gw` | go to Waiting |
 | `gm` | go to Someday |
+| `gS` | go to Spam (not in tab rotation) |
 
 
 ### Screener  (marked or cursor, any folder)
 
 | Key | Action |
 |-----|--------|
-| `I` | approve sender → screened_in.txt + move to Inbox |
-| `O` | block sender → screened_out.txt + move to ScreenedOut |
+| `I` | approve sender → screened_in.txt + move to Inbox (removes from blocked lists) |
+| `O` | block sender → screened_out.txt + move to ScreenedOut (removes from screened_in) |
+| `$` | mark as Spam → spam.txt + move to Spam (removes from screened_in/out) |
 | `F` | mark as Feed → feed.txt + move to Feed |
 | `P` | mark as PaperTrail → papertrail.txt + move to PaperTrail |
 | `A` | archive (move to Archive, no screener update) |
@@ -254,6 +258,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `:check  / :ch` | show screener classification for selected email |
 | `:delete-all  / :da` | permanently delete ALL emails in current folder (y/n) |
 | `:create-folders  / :cf` | create missing IMAP folders from config (safe, idempotent) |
+| `:go-spam  / :spam` | open Spam folder (not in tab rotation) |
 | `:quit  / :q` | quit neomd |
 
 
@@ -381,6 +386,10 @@ make help     print this list
 - [goldmark](https://github.com/yuin/goldmark) — Markdown → HTML for sending
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) — config parsing
 
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for what's new.
 
 ## Inspirations
 

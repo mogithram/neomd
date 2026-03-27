@@ -144,9 +144,11 @@ type Model struct {
 	helpSearch string
 
 	// cmdMode / cmdText / cmdTabI implement vim-style ":" command line.
-	cmdMode bool
-	cmdText string
-	cmdTabI int // cycle index for tab-completion
+	cmdMode    bool
+	cmdText    string
+	cmdTabI    int      // cycle index for tab-completion
+	cmdHistory []string // up to 5 most-recent distinct commands (newest first)
+	cmdHistI   int      // -1 = not browsing history; 0..n = history index
 
 	// filterActive / filterText implement our own inbox search.
 	// We bypass bubbles/list's built-in filter because SetShowTitle(false)
@@ -185,6 +187,9 @@ func New(cfg *config.Config, clients []*imap.Client, sc *screener.Screener) Mode
 		state:       stateInbox,
 		loading:     true,
 		folders:     []string{"Inbox", "ToScreen", "Feed", "PaperTrail", "Archive", "Waiting", "Someday", "Scheduled", "Sent", "Trash", "ScreenedOut"},
+		cmdHistory:  loadCmdHistory(config.HistoryPath()),
+		cmdHistI:    -1,
+		// Note: Spam is intentionally excluded from tabs — use :go-spam to visit.
 		compose:     newComposeModel(),
 		spinner:     sp,
 		markedUIDs:  make(map[uint32]bool),
@@ -240,6 +245,8 @@ func (m Model) activeFolder() string {
 		return m.cfg.Folders.Someday
 	case "ScreenedOut":
 		return m.cfg.Folders.ScreenedOut
+	case "Spam":
+		return m.cfg.Folders.Spam
 	default:
 		return m.cfg.Folders.Inbox
 	}
@@ -357,6 +364,8 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 			dst = cfg.Folders.Feed
 		case "P":
 			dst = cfg.Folders.PaperTrail
+		case "$":
+			dst = cfg.Folders.Spam
 		}
 		ops = append(ops, op{e.From, e.Folder, e.UID, dst})
 	}
@@ -372,6 +381,8 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 				err = sc.MarkFeed(o.from)
 			case "P":
 				err = sc.MarkPaperTrail(o.from)
+			case "$":
+				err = sc.MarkSpam(o.from)
 			}
 			if err != nil {
 				return batchDoneMsg{fmt.Errorf("stopped after %d/%d: %w", i, len(ops), err)}
@@ -442,6 +453,8 @@ func (m Model) classifyForScreen(emails []imap.Email) []autoScreenMove {
 		cat := m.screener.Classify(e.From)
 		var dst string
 		switch cat {
+		case screener.CategorySpam:
+			dst = m.cfg.Folders.Spam
 		case screener.CategoryScreenedOut:
 			dst = m.cfg.Folders.ScreenedOut
 		case screener.CategoryFeed:
@@ -532,7 +545,7 @@ func (m Model) ensureFoldersCmd() tea.Cmd {
 	folders := []string{
 		f.Inbox, f.Sent, f.Trash, f.Drafts,
 		f.ToScreen, f.Feed, f.PaperTrail, f.ScreenedOut,
-		f.Archive, f.Waiting, f.Scheduled, f.Someday,
+		f.Archive, f.Waiting, f.Scheduled, f.Someday, f.Spam,
 	}
 	return func() tea.Msg {
 		created, err := m.imapCli().EnsureFolders(nil, folders)
@@ -643,6 +656,9 @@ func (m Model) screenerCmd(e *imap.Email, action string) tea.Cmd {
 		case "P":
 			addErr = m.screener.MarkPaperTrail(e.From)
 			dst = m.cfg.Folders.PaperTrail
+		case "$":
+			addErr = m.screener.MarkSpam(e.From)
+			dst = m.cfg.Folders.Spam
 		}
 		if addErr != nil {
 			return errMsg{addErr}
@@ -827,6 +843,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cat := m.screener.Classify(e.From)
 			var dst string
 			switch cat {
+			case screener.CategorySpam:
+				dst = m.cfg.Folders.Spam
 			case screener.CategoryScreenedOut:
 				dst = m.cfg.Folders.ScreenedOut
 			case screener.CategoryFeed:
@@ -980,10 +998,16 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.cmdMode = false
 			m.cmdText = ""
+			m.cmdHistI = -1
 		case "enter":
 			m.cmdMode = false
+			m.cmdHistI = -1
 			input := strings.TrimSpace(m.cmdText)
 			m.cmdText = ""
+			if input != "" {
+				m.cmdHistory = addCmdHistory(m.cmdHistory, input)
+				go saveCmdHistory(config.HistoryPath(), m.cmdHistory)
+			}
 			if cmd := matchCmd(input); cmd != nil {
 				result, c := cmd.run(&m)
 				return result, c
@@ -992,22 +1016,54 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.status = "Unknown command: " + input
 				m.isError = true
 			}
+		case "up":
+			if len(m.cmdHistory) > 0 {
+				m.cmdHistI++
+				if m.cmdHistI >= len(m.cmdHistory) {
+					m.cmdHistI = len(m.cmdHistory) - 1
+				}
+				m.cmdText = m.cmdHistory[m.cmdHistI]
+				m.cmdTabI = 0
+			}
+		case "down":
+			if m.cmdHistI > 0 {
+				m.cmdHistI--
+				m.cmdText = m.cmdHistory[m.cmdHistI]
+			} else {
+				m.cmdHistI = -1
+				m.cmdText = ""
+			}
+			m.cmdTabI = 0
 		case "backspace", "ctrl+h":
 			runes := []rune(m.cmdText)
 			if len(runes) > 0 {
 				m.cmdText = string(runes[:len(runes)-1])
 			}
 			m.cmdTabI = 0
-		case "tab":
+			m.cmdHistI = -1
+		case "right": // accept ghost completion (first match)
+			if first := matchCmd(m.cmdText); first != nil {
+				m.cmdText = first.name
+				m.cmdTabI = 0
+			}
+		case "tab", "ctrl+n": // cycle forward through completions
 			matches := matchCmds(m.cmdText)
 			if len(matches) > 0 {
 				m.cmdText = matches[m.cmdTabI%len(matches)].name
+				m.cmdTabI++
+			}
+		case "ctrl+p": // cycle backward through completions
+			matches := matchCmds(m.cmdText)
+			if len(matches) > 0 {
+				m.cmdTabI = (m.cmdTabI - 2 + len(matches)) % len(matches)
+				m.cmdText = matches[m.cmdTabI].name
 				m.cmdTabI++
 			}
 		default:
 			if len(key) == 1 {
 				m.cmdText += key
 				m.cmdTabI = 0 // reset cycle on new input
+				m.cmdHistI = -1
 			}
 		}
 		return m, nil
@@ -1064,7 +1120,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Chord prefixes ──────────────────────────────────────────────
 	case "g":
 		m.pendingKey = "g"
-		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gm someday  gg top"
+		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gm someday  gS spam  gg top"
 		return m, nil
 
 	case " ": // leader key — wait for digit or shortcut
@@ -1096,7 +1152,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, setEmails(&m.inbox, m.emails, m.markedUIDs)
 
 	// ── Screener actions — operate on marked emails or cursor email ──
-	case "I", "O", "F", "P":
+	case "I", "O", "F", "P", "$":
 		targets := m.targetEmails()
 		if len(targets) == 0 {
 			return m, nil
@@ -1117,6 +1173,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ":":
 		m.cmdMode = true
 		m.cmdText = ""
+		m.cmdHistI = -1
 		return m, nil
 
 	case "S":
@@ -1290,6 +1347,49 @@ func (m *Model) sortEmails() tea.Cmd {
 	return setEmails(&m.inbox, m.emails, m.markedUIDs)
 }
 
+// loadCmdHistory reads persisted command history from path (newest first).
+// Returns nil on any error so startup is never blocked.
+func loadCmdHistory(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// saveCmdHistory writes history to path (one entry per line, newest first).
+// Called in a goroutine — errors are silently ignored.
+func saveCmdHistory(path string, history []string) {
+	content := strings.Join(history, "\n") + "\n"
+	_ = os.WriteFile(path, []byte(content), 0600)
+}
+
+// addCmdHistory prepends input to history (deduplicating) and caps at 5 entries.
+func addCmdHistory(history []string, input string) []string {
+	// Remove existing occurrence of the same command (dedup)
+	out := history[:0:len(history)]
+	for _, h := range history {
+		if h != input {
+			out = append(out, h)
+		}
+	}
+	// Prepend newest entry
+	result := make([]string, 1, len(out)+1)
+	result[0] = input
+	result = append(result, out...)
+	if len(result) > 5 {
+		result = result[:5]
+	}
+	return result
+}
+
 // applyFilter filters m.emails by filterText and refreshes the list.
 // Call this whenever filterText changes.
 func (m *Model) applyFilter() tea.Cmd {
@@ -1331,6 +1431,11 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 		if key == "g" { // gg = top of list
 			m.inbox.Select(0)
 			return m, nil
+		}
+		if key == "S" { // gS — go to Spam (not in tab rotation)
+			m.loading = true
+			m.status = "Spam folder — press R to reload, tab to leave"
+			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Spam))
 		}
 		folderMap := map[string]string{
 			"i": "Inbox",
