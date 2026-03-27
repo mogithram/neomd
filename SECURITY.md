@@ -27,7 +27,7 @@ neomd handles IMAP/SMTP credentials and email content. This document explains wh
 | IMAP | 143 | `imapclient.DialStartTLS` — STARTTLS negotiated |
 | Any other port | — | **Refused** — neomd errors out rather than connect unencrypted |
 | SMTP | 465 | Explicit `tls.Dial` before any auth |
-| SMTP | 587 | Go stdlib `PlainAuth` — refuses to send credentials over a non-TLS connection (except localhost) |
+| SMTP | 587 | Go stdlib `PlainAuth` guarantee — refuses credentials over non-TLS (except localhost); note: this is a stdlib property, not enforced by neomd code |
 
 **Code:** [`internal/imap/client.go`](https://github.com/ssp-data/neomd/blob/main/internal/imap/client.go) — `connect()` · [`internal/smtp/sender.go`](https://github.com/ssp-data/neomd/blob/main/internal/smtp/sender.go) — `Send()`
 

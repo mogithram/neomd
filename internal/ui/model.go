@@ -1120,7 +1120,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Chord prefixes ──────────────────────────────────────────────
 	case "g":
 		m.pendingKey = "g"
-		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gm someday  gS spam  gg top"
+		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gm someday  gd drafts  gS spam  gg top"
 		return m, nil
 
 	case " ": // leader key — wait for digit or shortcut
@@ -1448,6 +1448,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"w": "Waiting",
 			"m": "Someday",
 			"o": "ScreenedOut",
+			"d": "Drafts",
 		}
 		if name, ok := folderMap[key]; ok {
 			for i, f := range m.folders {
@@ -1638,7 +1639,8 @@ func (m Model) openWebVersion() (tea.Model, tea.Cmd) {
 		m.status = "No web version link found in this email."
 		return m, nil
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+	lower := strings.ToLower(url)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		m.status = "Blocked: URL has unsafe scheme."
 		return m, nil
 	}
