@@ -7,16 +7,23 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"mime"
 	"net"
 	"net/smtp"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sspaeti/neomd/internal/render"
 )
+
+// imgSrcRe matches <img src="/absolute/path"> produced by goldmark for local paths.
+var imgSrcRe = regexp.MustCompile(`<img\s[^>]*src="(/[^"]+)"`)
 
 // Config holds outgoing mail settings.
 type Config struct {
@@ -29,18 +36,27 @@ type Config struct {
 
 // Send composes and sends an email.
 // markdownBody is sent as text/plain (raw) and text/html (goldmark-rendered).
-func Send(cfg Config, to, subject, markdownBody string) error {
+// cc and bcc may be empty. BCC recipients receive the email but are not visible
+// in the message headers (standard BCC privacy behaviour).
+// attachments is a list of local file paths (may be nil).
+func Send(cfg Config, to, cc, bcc, subject, markdownBody string, attachments []string) error {
 	htmlBody, err := render.ToHTML(markdownBody)
 	if err != nil {
 		return fmt.Errorf("markdown to html: %w", err)
 	}
 
-	raw, err := buildMessage(cfg.From, to, subject, markdownBody, htmlBody)
+	// BCC is intentionally NOT passed to buildMessage — it must not appear in headers.
+	raw, err := buildMessage(cfg.From, to, cc, subject, markdownBody, htmlBody, attachments)
 	if err != nil {
 		return fmt.Errorf("build message: %w", err)
 	}
 
 	toAddrs := []string{extractAddr(to)}
+	for _, addr := range strings.Split(cc+","+bcc, ",") {
+		if a := extractAddr(strings.TrimSpace(addr)); a != "" && a != extractAddr(to) {
+			toAddrs = append(toAddrs, a)
+		}
+	}
 	fromAddr := extractAddr(cfg.From)
 
 	addr := cfg.Host + ":" + cfg.Port
@@ -94,9 +110,48 @@ func sendTLS(addr, host, user, password, from string, to []string, msg []byte) e
 	return w.Close()
 }
 
-// buildMessage constructs a multipart/alternative MIME message.
-func buildMessage(from, to, subject, plainText, htmlBody string) ([]byte, error) {
-	boundary, err := randomBoundary()
+// BuildMessage constructs a raw MIME message suitable for SMTP DATA or IMAP APPEND.
+// BCC must not be passed — it must never appear in message headers.
+// When attachments is non-empty the message is wrapped in multipart/mixed;
+// otherwise the structure is unchanged (multipart/alternative only).
+func BuildMessage(from, to, cc, subject, markdownBody string, attachments []string) ([]byte, error) {
+	htmlBody, err := render.ToHTML(markdownBody)
+	if err != nil {
+		return nil, fmt.Errorf("markdown to html: %w", err)
+	}
+	return buildMessage(from, to, cc, subject, markdownBody, htmlBody, attachments)
+}
+
+// inlineImage holds a local image path and its assigned Content-ID.
+type inlineImage struct {
+	path string
+	cid  string // without angle brackets, e.g. "img0@neomd"
+}
+
+// buildMessage constructs a MIME message.
+// Images referenced as <img src="/abs/path"> in htmlBody are embedded inline
+// via multipart/related with Content-ID headers (standard inline image embedding).
+// File attachments (non-image) are wrapped in multipart/mixed.
+// MIME structure:
+//   - no images, no files  → multipart/alternative
+//   - files only           → multipart/mixed > multipart/alternative
+//   - images only          → multipart/related > (multipart/alternative + inline images)
+//   - images + files       → multipart/mixed > (multipart/related > alt+images) + files
+func buildMessage(from, to, cc, subject, plainText, htmlBody string, attachments []string) ([]byte, error) {
+	// Find local image paths in htmlBody (<img src="/abs/path">), assign CIDs.
+	var inlines []inlineImage
+	processedHTML := imgSrcRe.ReplaceAllStringFunc(htmlBody, func(match string) string {
+		m := imgSrcRe.FindStringSubmatch(match)
+		if len(m) < 2 {
+			return match
+		}
+		localPath := m[1]
+		cid := fmt.Sprintf("img%d@neomd", len(inlines))
+		inlines = append(inlines, inlineImage{path: localPath, cid: cid})
+		return strings.Replace(match, `"`+localPath+`"`, `"cid:`+cid+`"`, 1)
+	})
+
+	altBoundary, err := randomBoundary()
 	if err != nil {
 		return nil, err
 	}
@@ -106,39 +161,179 @@ func buildMessage(from, to, subject, plainText, htmlBody string) ([]byte, error)
 	}
 
 	var b bytes.Buffer
-
-	// Headers
 	hdr := func(k, v string) { fmt.Fprintf(&b, "%s: %s\r\n", k, v) }
-	hdr("From", from)
-	hdr("To", to)
-	hdr("Subject", mime.QEncoding.Encode("utf-8", subject))
-	hdr("Date", time.Now().Format(time.RFC1123Z))
-	hdr("Message-ID", "<"+msgID+"@neomd>")
-	hdr("MIME-Version", "1.0")
-	hdr("Content-Type", `multipart/alternative; boundary="`+boundary+`"`)
-	hdr("X-Mailer", "neomd")
-	b.WriteString("\r\n")
 
-	// text/plain part (raw markdown — readable as-is in any client)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	writeHeaders := func(contentType string) {
+		hdr("From", from)
+		hdr("To", to)
+		if cc != "" {
+			hdr("Cc", cc)
+		}
+		hdr("Subject", mime.QEncoding.Encode("utf-8", subject))
+		hdr("Date", time.Now().Format(time.RFC1123Z))
+		hdr("Message-ID", "<"+msgID+"@neomd>")
+		hdr("MIME-Version", "1.0")
+		hdr("Content-Type", contentType)
+		hdr("X-Mailer", "neomd")
+		b.WriteString("\r\n")
+	}
+
+	hasFiles := len(attachments) > 0
+	hasImages := len(inlines) > 0
+
+	switch {
+	case !hasImages && !hasFiles:
+		// Simple: multipart/alternative only
+		writeHeaders(`multipart/alternative; boundary="` + altBoundary + `"`)
+		writeAltParts(&b, altBoundary, plainText, processedHTML)
+
+	case hasFiles && !hasImages:
+		// multipart/mixed > multipart/alternative + file attachments
+		mixedBoundary, err := randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+		writeHeaders(`multipart/mixed; boundary="` + mixedBoundary + `"`)
+		fmt.Fprintf(&b, "--%s\r\n", mixedBoundary)
+		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", altBoundary)
+		writeAltParts(&b, altBoundary, plainText, processedHTML)
+		for _, path := range attachments {
+			if err := writeAttachment(&b, mixedBoundary, path); err != nil {
+				return nil, fmt.Errorf("attachment %s: %w", path, err)
+			}
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", mixedBoundary)
+
+	case hasImages && !hasFiles:
+		// multipart/related > multipart/alternative + inline images
+		relBoundary, err := randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+		writeHeaders(`multipart/related; boundary="` + relBoundary + `"`)
+		fmt.Fprintf(&b, "--%s\r\n", relBoundary)
+		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", altBoundary)
+		writeAltParts(&b, altBoundary, plainText, processedHTML)
+		for _, img := range inlines {
+			if err := writeInlineImage(&b, relBoundary, img); err != nil {
+				return nil, fmt.Errorf("inline image %s: %w", img.path, err)
+			}
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", relBoundary)
+
+	default:
+		// multipart/mixed > multipart/related > (alt + images) + file attachments
+		mixedBoundary, err := randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+		relBoundary, err := randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+		writeHeaders(`multipart/mixed; boundary="` + mixedBoundary + `"`)
+		// related part
+		fmt.Fprintf(&b, "--%s\r\n", mixedBoundary)
+		fmt.Fprintf(&b, "Content-Type: multipart/related; boundary=\"%s\"\r\n\r\n", relBoundary)
+		fmt.Fprintf(&b, "--%s\r\n", relBoundary)
+		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", altBoundary)
+		writeAltParts(&b, altBoundary, plainText, processedHTML)
+		for _, img := range inlines {
+			if err := writeInlineImage(&b, relBoundary, img); err != nil {
+				return nil, fmt.Errorf("inline image %s: %w", img.path, err)
+			}
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", relBoundary)
+		// file attachments
+		for _, path := range attachments {
+			if err := writeAttachment(&b, mixedBoundary, path); err != nil {
+				return nil, fmt.Errorf("attachment %s: %w", path, err)
+			}
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", mixedBoundary)
+	}
+
+	return b.Bytes(), nil
+}
+
+// writeInlineImage appends a base64-encoded image part with Content-ID for inline display.
+func writeInlineImage(b *bytes.Buffer, boundary string, img inlineImage) error {
+	data, err := os.ReadFile(img.path)
+	if err != nil {
+		return err
+	}
+	filename := filepath.Base(img.path)
+	mimeType := mime.TypeByExtension(filepath.Ext(img.path))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	fmt.Fprintf(b, "--%s\r\n", boundary)
+	fmt.Fprintf(b, "Content-Type: %s; name=\"%s\"\r\n", mimeType, filename)
+	fmt.Fprintf(b, "Content-ID: <%s>\r\n", img.cid)
+	b.WriteString("Content-Disposition: inline\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+
+	enc := base64.StdEncoding.EncodeToString(data)
+	for len(enc) > 76 {
+		b.WriteString(enc[:76])
+		b.WriteString("\r\n")
+		enc = enc[76:]
+	}
+	if len(enc) > 0 {
+		b.WriteString(enc)
+		b.WriteString("\r\n")
+	}
+	return nil
+}
+
+// writeAltParts writes the text/plain and text/html parts into b using boundary.
+func writeAltParts(b *bytes.Buffer, boundary, plainText, htmlBody string) {
+	fmt.Fprintf(b, "--%s\r\n", boundary)
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	b.WriteString("\r\n")
-	writeQP(&b, plainText)
+	writeQP(b, plainText)
 	b.WriteString("\r\n")
 
-	// text/html part (goldmark rendered)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	fmt.Fprintf(b, "--%s\r\n", boundary)
 	b.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	b.WriteString("\r\n")
-	writeQP(&b, htmlBody)
+	writeQP(b, htmlBody)
 	b.WriteString("\r\n")
 
-	// Closing boundary
-	fmt.Fprintf(&b, "--%s--\r\n", boundary)
+	fmt.Fprintf(b, "--%s--\r\n", boundary)
+}
 
-	return b.Bytes(), nil
+// writeAttachment appends a single file as a base64-encoded MIME part.
+func writeAttachment(b *bytes.Buffer, boundary, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	filename := filepath.Base(path)
+	mimeType := mime.TypeByExtension(filepath.Ext(path))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	fmt.Fprintf(b, "--%s\r\n", boundary)
+	fmt.Fprintf(b, "Content-Type: %s; name=\"%s\"\r\n", mimeType, filename)
+	fmt.Fprintf(b, "Content-Disposition: attachment; filename=\"%s\"\r\n", filename)
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+
+	enc := base64.StdEncoding.EncodeToString(data)
+	for len(enc) > 76 {
+		b.WriteString(enc[:76])
+		b.WriteString("\r\n")
+		enc = enc[76:]
+	}
+	if len(enc) > 0 {
+		b.WriteString(enc)
+		b.WriteString("\r\n")
+	}
+	return nil
 }
 
 // writeQP writes s as simplified quoted-printable (ASCII passthrough,

@@ -27,6 +27,8 @@ type Email struct {
 	UID     uint32
 	From    string
 	To      string
+	CC      string // comma-separated CC addresses (may be empty)
+	ReplyTo string // Reply-To address if present (may be empty)
 	Subject string
 	Date    time.Time
 	Seen    bool
@@ -221,6 +223,16 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 				}
 				if len(m.Envelope.To) > 0 {
 					e.To = m.Envelope.To[0].Addr()
+				}
+				if len(m.Envelope.Cc) > 0 {
+					cc := make([]string, 0, len(m.Envelope.Cc))
+					for _, a := range m.Envelope.Cc {
+						cc = append(cc, a.Addr())
+					}
+					e.CC = strings.Join(cc, ", ")
+				}
+				if len(m.Envelope.ReplyTo) > 0 {
+					e.ReplyTo = m.Envelope.ReplyTo[0].Addr()
 				}
 			}
 			e.Size = uint32(m.RFC822Size)
@@ -508,6 +520,31 @@ func (c *Client) MarkUnseen(ctx context.Context, folder string, uid uint32) erro
 			Op:    imap.StoreFlagsDel,
 			Flags: []imap.Flag{imap.FlagSeen},
 		}, nil).Close()
+	})
+}
+
+// SaveDraft APPENDs a raw MIME message to the given folder with the \Draft flag.
+// The folder must already exist (use EnsureFolders if needed).
+func (c *Client) SaveDraft(ctx context.Context, folder string, raw []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.withConn(ctx, func(conn *imapclient.Client) error {
+		opts := &imap.AppendOptions{
+			Flags: []imap.Flag{imap.FlagDraft, imap.FlagSeen},
+			Time:  time.Now(),
+		}
+		cmd := conn.Append(folder, int64(len(raw)), opts)
+		if _, err := cmd.Write(raw); err != nil {
+			return fmt.Errorf("APPEND write: %w", err)
+		}
+		if err := cmd.Close(); err != nil {
+			return fmt.Errorf("APPEND close: %w", err)
+		}
+		if _, err := cmd.Wait(); err != nil {
+			return fmt.Errorf("APPEND wait: %w", err)
+		}
+		return nil
 	})
 }
 

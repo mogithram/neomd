@@ -67,12 +67,12 @@ func inboxHelp(folder string) string {
 // composeHelp returns the one-line help string for the compose view.
 func composeHelp(step int) string {
 	switch step {
-	case 0:
-		return styleHelp.Render("  tab next field · enter next field")
-	case 1:
-		return styleHelp.Render("  enter open editor")
-	default:
-		return styleHelp.Render("  esc cancel · enter send")
+	case 0: // stepTo
+		return styleHelp.Render("  tab/enter next · ctrl+b toggle Cc/Bcc · ctrl+t attach · esc cancel")
+	case 1, 2: // stepCC, stepBCC
+		return styleHelp.Render("  tab/enter next (optional) · ctrl+b hide Cc/Bcc · ctrl+t attach · esc cancel")
+	default: // stepSubject
+		return styleHelp.Render("  enter open editor · ctrl+t attach · D remove last attachment · esc cancel")
 	}
 }
 

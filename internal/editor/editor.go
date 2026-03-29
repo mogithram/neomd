@@ -74,21 +74,28 @@ func View(content string) (*exec.Cmd, string, error) {
 }
 
 // Prelude builds the comment header shown at the top of a new compose buffer.
-// If signature is non-empty it is appended after a blank line separator.
-func Prelude(to, subject, signature string) string {
-	s := fmt.Sprintf("<!-- To: %s -->\n<!-- Subject: %s -->\n\n", to, subject)
+// cc may be empty. If signature is non-empty it is appended after a blank line separator.
+func Prelude(to, cc, subject, signature string) string {
+	s := fmt.Sprintf("<!-- To: %s -->\n", to)
+	if cc != "" {
+		s += fmt.Sprintf("<!-- CC: %s -->\n", cc)
+	}
+	s += fmt.Sprintf("<!-- Subject: %s -->\n\n", subject)
 	if signature != "" {
 		s += "\n\n--  \n" + signature + "\n"
 	}
 	return s
 }
 
-// ReplyPrelude builds a quote block for replies.
-func ReplyPrelude(to, subject, originalFrom, originalBody string) string {
-	return fmt.Sprintf(
-		"<!-- To: %s -->\n<!-- Subject: Re: %s -->\n\n---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
-		to, subject, originalFrom, quoteLines(originalBody),
-	)
+// ReplyPrelude builds a quote block for replies. cc may be empty.
+func ReplyPrelude(to, cc, subject, originalFrom, originalBody string) string {
+	s := fmt.Sprintf("<!-- To: %s -->\n", to)
+	if cc != "" {
+		s += fmt.Sprintf("<!-- CC: %s -->\n", cc)
+	}
+	s += fmt.Sprintf("<!-- Subject: Re: %s -->\n\n---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
+		subject, originalFrom, quoteLines(originalBody))
+	return s
 }
 
 func quoteLines(body string) string {

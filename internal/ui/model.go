@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	stateInbox   viewState = iota
 	stateReading           // reading a single email
 	stateCompose           // composing a new email
+	statePresend           // pre-send review: add attachments, then send or edit again
 	stateHelp              // help overlay
 )
 
@@ -79,12 +81,20 @@ type (
 	bgSyncTickMsg     struct{}
 	bgInboxFetchedMsg struct{ emails []imap.Email }
 	bgScreenDoneMsg   struct{ moved int }
+	// attachPickDoneMsg carries paths selected via the file picker (yazi etc.)
+	attachPickDoneMsg struct{ paths []string }
+	saveDraftDoneMsg  struct{ err error }
 	editorDoneMsg     struct {
-		to, subject, body string
-		err               error
-		aborted           bool // true when file was unchanged (ZQ / :q!)
+		to, cc, bcc, subject, body string
+		err                        error
+		aborted                    bool // true when file was unchanged (ZQ / :q!)
 	}
 )
+
+// pendingSendData holds a composed message waiting in the pre-send review screen.
+type pendingSendData struct {
+	to, cc, bcc, subject, body string
+}
 
 // autoScreenMove is a planned (not yet executed) IMAP move.
 type autoScreenMove struct {
@@ -122,8 +132,10 @@ type Model struct {
 	openHTMLBody string // original HTML part; used by openInExternalViewer when available
 	openWebURL   string // canonical "view online" URL for ctrl+o (may be empty)
 
-	// Compose
-	compose composeModel
+	// Compose / pre-send
+	compose     composeModel
+	attachments []string // files to attach to the next send (cleared after send)
+	pendingSend *pendingSendData
 
 	// Status / error
 	status  string
@@ -275,7 +287,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(to, subject, body string) tea.Cmd {
+func (m Model) sendEmailCmd(to, cc, bcc, subject, body string, attachments []string) tea.Cmd {
 	h, p := splitAddr(m.activeAccount().SMTP)
 	cfg := smtp.Config{
 		Host:     h,
@@ -285,7 +297,7 @@ func (m Model) sendEmailCmd(to, subject, body string) tea.Cmd {
 		From:     m.activeAccount().From,
 	}
 	return func() tea.Msg {
-		return sendDoneMsg{smtp.Send(cfg, to, subject, body)}
+		return sendDoneMsg{smtp.Send(cfg, to, cc, bcc, subject, body, attachments)}
 	}
 }
 
@@ -773,6 +785,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case saveDraftDoneMsg:
+		if msg.err != nil {
+			m.status = "Draft error: " + msg.err.Error()
+			m.isError = true
+		} else {
+			m.attachments = nil
+			m.pendingSend = nil
+			m.state = stateInbox
+			m.status = "Saved to Drafts."
+			m.isError = false
+		}
+		return m, nil
+
 	case screenDoneMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -961,8 +986,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateInbox
 			return m, nil
 		}
-		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(msg.to, msg.subject, msg.body))
+		// Extract any <!-- Attach: path --> lines the user inserted in the editor.
+		inlineAttach, cleanBody := extractInlineAttachments(msg.body)
+		m.attachments = append(m.attachments, inlineAttach...)
+
+		// Go to pre-send review instead of sending immediately.
+		m.pendingSend = &pendingSendData{
+			to: msg.to, cc: msg.cc, bcc: msg.bcc,
+			subject: msg.subject, body: cleanBody,
+		}
+		m.state = statePresend
+		return m, nil
+
+	case attachPickDoneMsg:
+		m.attachments = append(m.attachments, msg.paths...)
+		if len(msg.paths) > 0 {
+			m.status = fmt.Sprintf("Attached %d file(s).", len(msg.paths))
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		// ? opens help from any state; q/esc/? closes it
@@ -982,6 +1023,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateReader(msg)
 		case stateCompose:
 			return m.updateCompose(msg)
+		case statePresend:
+			return m.updatePresend(msg)
 		case stateHelp:
 			return m.updateHelp(msg)
 		}
@@ -1535,6 +1578,8 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "e":
 		return m.openInNeovim()
+	case "E":
+		return m.continueDraft()
 	case "o":
 		return m.openInW3m()
 	case "O":
@@ -1544,6 +1589,10 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.openEmail != nil {
 			return m.launchReplyCmd()
+		}
+	case "R":
+		if m.openEmail != nil {
+			return m.launchReplyAllCmd()
 		}
 	}
 	var cmd tea.Cmd
@@ -1722,10 +1771,77 @@ func (m Model) openInNeovim() (tea.Model, tea.Cmd) {
 	})
 }
 
+// continueDraft opens the current email as an editable compose session,
+// pre-filling To/CC/Subject and body from the saved draft. Saving in the
+// editor goes through the normal pre-send review (enter to send, d to re-save).
+func (m Model) continueDraft() (tea.Model, tea.Cmd) {
+	if m.openEmail == nil {
+		return m, nil
+	}
+	e := m.openEmail
+	to := e.To
+	cc := e.CC
+	subject := e.Subject
+
+	// Pre-fill compose fields so viewCompose shows them
+	m.compose.reset()
+	m.compose.to.SetValue(to)
+	m.compose.cc.SetValue(cc)
+	m.compose.subject.SetValue(subject)
+	if cc != "" {
+		m.compose.extraVisible = true
+	}
+	m.compose.step = 3 // jump past header steps to subject-done state
+
+	// Build temp file with prelude + existing body
+	prelude := editor.Prelude(to, cc, subject, m.cfg.UI.Signature)
+	body := m.openBody
+
+	f, err := os.CreateTemp("", "neomd-*.md")
+	if err != nil {
+		m.status = "continueDraft: " + err.Error()
+		m.isError = true
+		return m, nil
+	}
+	tmpPath := f.Name()
+	f.WriteString(prelude + body) //nolint
+	f.Close()
+
+	editorBin := os.Getenv("EDITOR")
+	if editorBin == "" {
+		editorBin = "nvim"
+	}
+	cmd := exec.Command(editorBin, tmpPath)
+	m.state = stateCompose
+	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
+		defer os.Remove(tmpPath)
+		if execErr != nil {
+			return editorDoneMsg{err: execErr}
+		}
+		raw, readErr := os.ReadFile(tmpPath)
+		if readErr != nil {
+			return editorDoneMsg{err: readErr}
+		}
+		if string(raw) == prelude+body {
+			return editorDoneMsg{aborted: true}
+		}
+		return editorDoneMsg{to: to, cc: cc, bcc: "", subject: subject, body: string(raw)}
+	})
+}
+
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.attachments = nil
 		m.state = stateInbox
+		return m, nil
+	case "ctrl+t":
+		return m.launchAttachPickerCmd()
+	case "D":
+		// Remove last attachment
+		if len(m.attachments) > 0 {
+			m.attachments = m.attachments[:len(m.attachments)-1]
+		}
 		return m, nil
 	}
 
@@ -1738,10 +1854,78 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// updatePresend handles keys in the pre-send review screen.
+// a = attach, enter = send, e = re-open editor, D = remove last attachment, esc = cancel
+func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ps := m.pendingSend
+	if ps == nil {
+		m.state = stateInbox
+		return m, nil
+	}
+	switch msg.String() {
+	case "enter":
+		m.loading = true
+		m.state = stateInbox
+		attachments := m.attachments
+		m.attachments = nil
+		m.pendingSend = nil
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments))
+	case "a":
+		return m.launchAttachPickerCmd()
+	case "D":
+		if len(m.attachments) > 0 {
+			m.attachments = m.attachments[:len(m.attachments)-1]
+		}
+		return m, nil
+	case "e":
+		// Re-open the editor with the current body for further edits.
+		// Build a temp file with existing body and re-launch.
+		m.state = stateCompose
+		m.pendingSend = nil
+		prelude := editor.Prelude(ps.to, ps.cc, ps.subject, m.cfg.UI.Signature)
+		// Pre-fill compose fields so launchEditorCmd picks them up
+		m.compose.to.SetValue(ps.to)
+		m.compose.cc.SetValue(ps.cc)
+		m.compose.bcc.SetValue(ps.bcc)
+		m.compose.subject.SetValue(ps.subject)
+		if ps.cc != "" || ps.bcc != "" {
+			m.compose.extraVisible = true
+		}
+		_ = prelude
+		return m.launchEditorCmd()
+	case "d":
+		// Save to Drafts without sending.
+		return m, m.saveDraftCmd(ps.to, ps.cc, ps.subject, ps.body, m.attachments)
+	case "esc":
+		m.attachments = nil
+		m.pendingSend = nil
+		m.state = stateInbox
+		m.status = "Cancelled."
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) saveDraftCmd(to, cc, subject, body string, attachments []string) tea.Cmd {
+	cli := m.imapCli()
+	from := m.activeAccount().From
+	folder := m.cfg.Folders.Drafts
+	return func() tea.Msg {
+		raw, err := smtp.BuildMessage(from, to, cc, subject, body, attachments)
+		if err != nil {
+			return saveDraftDoneMsg{err: err}
+		}
+		err = cli.SaveDraft(nil, folder, raw)
+		return saveDraftDoneMsg{err: err}
+	}
+}
+
 func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 	to := m.compose.to.Value()
+	cc := m.compose.cc.Value()
+	bcc := m.compose.bcc.Value()
 	subject := m.compose.subject.Value()
-	prelude := editor.Prelude(to, subject, m.cfg.UI.Signature)
+	prelude := editor.Prelude(to, cc, subject, m.cfg.UI.Signature)
 
 	// Write temp file
 	f, err := os.CreateTemp("", "neomd-*.md")
@@ -1773,18 +1957,94 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 		if string(raw) == prelude {
 			return editorDoneMsg{aborted: true}
 		}
-		return editorDoneMsg{to: to, subject: subject, body: string(raw)}
+		return editorDoneMsg{to: to, cc: cc, bcc: bcc, subject: subject, body: string(raw)}
+	})
+}
+
+// launchAttachPickerCmd suspends the TUI, launches yazi (or $NEOMD_FILE_PICKER)
+// with --chooser-file, and returns selected paths as attachPickDoneMsg.
+// Falls back to a no-op status message if no picker is available.
+func (m Model) launchAttachPickerCmd() (tea.Model, tea.Cmd) {
+	picker := os.Getenv("NEOMD_FILE_PICKER")
+	if picker == "" {
+		if _, err := exec.LookPath("yazi"); err == nil {
+			picker = "yazi"
+		}
+	}
+	if picker == "" {
+		m.status = "No file picker found. Set $NEOMD_FILE_PICKER or install yazi."
+		return m, nil
+	}
+
+	chooserFile, err := os.CreateTemp("", "neomd-pick-*.txt")
+	if err != nil {
+		m.status = "attach: " + err.Error()
+		return m, nil
+	}
+	chooserPath := chooserFile.Name()
+	chooserFile.Close()
+
+	cmd := exec.Command(picker, "--chooser-file", chooserPath)
+	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
+		defer os.Remove(chooserPath)
+		if execErr != nil {
+			return attachPickDoneMsg{}
+		}
+		raw, _ := os.ReadFile(chooserPath)
+		var paths []string
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if l := strings.TrimSpace(line); l != "" {
+				paths = append(paths, l)
+			}
+		}
+		return attachPickDoneMsg{paths: paths}
 	})
 }
 
 func (m Model) launchReplyCmd() (tea.Model, tea.Cmd) {
+	return m.launchReplyWithCC("", false)
+}
+
+func (m Model) launchReplyAllCmd() (tea.Model, tea.Cmd) {
+	return m.launchReplyWithCC("", true)
+}
+
+// launchReplyWithCC is the shared implementation for r (reply) and R (reply-all).
+func (m Model) launchReplyWithCC(extraCC string, replyAll bool) (tea.Model, tea.Cmd) {
 	e := m.openEmail
-	to := e.From
+
+	// Use Reply-To if present, else From
+	to := e.ReplyTo
+	if to == "" {
+		to = e.From
+	}
+
 	subject := e.Subject
 	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
 		subject = "Re: " + subject
 	}
-	prelude := editor.ReplyPrelude(to, subject, e.From, m.openBody)
+
+	cc := ""
+	if replyAll {
+		// Collect original To + CC, exclude own address
+		own := strings.ToLower(extractEmailAddr(m.activeAccount().User))
+		var parts []string
+		for _, addr := range splitAddrs(e.To + "," + e.CC) {
+			if a := strings.TrimSpace(addr); a != "" && strings.ToLower(extractEmailAddr(a)) != own {
+				parts = append(parts, a)
+			}
+		}
+		cc = strings.Join(parts, ", ")
+	}
+	if extraCC != "" {
+		if cc != "" {
+			cc += ", " + extraCC
+		} else {
+			cc = extraCC
+		}
+	}
+
+	prelude := editor.ReplyPrelude(to, cc, subject, e.From, m.openBody)
 
 	f, err := os.CreateTemp("", "neomd-*.md")
 	if err != nil {
@@ -1814,8 +2074,64 @@ func (m Model) launchReplyCmd() (tea.Model, tea.Cmd) {
 		if string(raw) == prelude {
 			return editorDoneMsg{aborted: true}
 		}
-		return editorDoneMsg{to: to, subject: subject, body: string(raw)}
+		return editorDoneMsg{to: to, cc: cc, bcc: "", subject: subject, body: string(raw)}
 	})
+}
+
+// extractEmailAddr returns the bare email address from "Name <addr>" or "addr".
+func extractEmailAddr(s string) string {
+	if i := strings.IndexByte(s, '<'); i >= 0 {
+		if j := strings.IndexByte(s, '>'); j > i {
+			return strings.TrimSpace(s[i+1 : j])
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+// splitAddrs splits a comma-separated address list, skipping empty entries.
+func splitAddrs(s string) []string {
+	var out []string
+	for _, a := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(a); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// imageExts are file extensions treated as inline images (embedded via CID in HTML).
+var imageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true,
+	".gif": true, ".webp": true, ".svg": true,
+}
+
+// extractInlineAttachments scans body for [attach] /path lines inserted by the
+// neomd Lua helper in neovim (<leader>a).
+// - Image files (.png, .jpg, …) are converted to ![](path) markdown refs so
+//   goldmark renders them as <img> tags inline; the sender embeds them via CID.
+// - Non-image files are returned as file attachment paths (appended at bottom).
+// Returns (filePaths, cleanBody).
+func extractInlineAttachments(body string) (files []string, clean string) {
+	const prefix = "[attach] "
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			p := strings.TrimSpace(trimmed[len(prefix):])
+			if p == "" {
+				continue
+			}
+			if imageExts[strings.ToLower(filepath.Ext(p))] {
+				// Inline: replace with markdown image ref
+				kept = append(kept, "![]("+p+")")
+			} else {
+				files = append(files, p)
+			}
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return files, strings.Join(kept, "\n")
 }
 
 // ── View ──────────────────────────────────────────────────────────────────
@@ -1831,10 +2147,57 @@ func (m Model) View() string {
 		return m.viewReader()
 	case stateCompose:
 		return m.viewCompose()
+	case statePresend:
+		return m.viewPresend()
 	case stateHelp:
 		return m.viewHelp()
 	}
 	return ""
+}
+
+func (m Model) viewPresend() string {
+	ps := m.pendingSend
+	if ps == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("  Ready to send") + "\n")
+	b.WriteString(styleSeparator.Render(strings.Repeat("─", m.width)) + "\n\n")
+
+	lbl := styleInputLabel.Render
+	b.WriteString(lbl("To:") + "  " + ps.to + "\n")
+	if ps.cc != "" {
+		b.WriteString(lbl("Cc:") + "  " + ps.cc + "\n")
+	}
+	if ps.bcc != "" {
+		b.WriteString(lbl("Bcc:") + " " + ps.bcc + "\n")
+	}
+	b.WriteString(lbl("Subject:") + " " + ps.subject + "\n")
+
+	// Show first 3 non-empty lines of body as a preview (skip [attach] lines already extracted)
+	preview := 0
+	for _, line := range strings.Split(ps.body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		b.WriteString(styleHelp.Render("  > "+line) + "\n")
+		preview++
+		if preview >= 3 {
+			break
+		}
+	}
+
+	b.WriteString("\n")
+	if len(m.attachments) > 0 {
+		for _, a := range m.attachments {
+			b.WriteString("  [attach] " + filepath.Base(a) + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(styleHelp.Render("  enter send · a attach · D remove last · d draft · e edit · esc cancel"))
+	return b.String()
 }
 
 func (m Model) viewInbox() string {
@@ -1905,6 +2268,12 @@ func (m Model) viewCompose() string {
 	b.WriteString(styleHeader.Render("  New Message") + "\n")
 	b.WriteString(styleSeparator.Render(strings.Repeat("─", m.width)) + "\n\n")
 	b.WriteString(m.compose.view() + "\n\n")
+	if len(m.attachments) > 0 {
+		for _, a := range m.attachments {
+			b.WriteString("  [attach] " + filepath.Base(a) + "\n")
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString(composeHelp(int(m.compose.step)))
 	return b.String()
 }
