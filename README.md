@@ -398,11 +398,14 @@ This means recipients using Gmail, Apple Mail, Outlook, etc. see properly format
 
 Attachments are now supported and tighly integrated into neovim.
 
+> **Note: custom.lua in neovim needed for this**
+> You need to add [custom.lua]([https://github.com/sspaeti/dotfiles/blob/master/nvim/.config/nvim/lua/sspaeti/custom.lua) to your neovim config to be able to add the neomd attachmend with yazi (yazi need to be installed too). See link above to my custom.lua config.
+
 With `<leader>a` in a `neomd-*.md` buffer opens **yazi** in a floating terminal - you can select files are inserted as `[attach] /path/to/file` lines (visible in markdown, not hidden HTML comments)
 
 Neomd strips them before sending and adds them as MIME attachments.
 
-E.g. 
+For example this markdown below:
 ```markdown
 
 e.g. an image:
