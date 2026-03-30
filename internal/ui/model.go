@@ -696,6 +696,18 @@ func (m Model) deleteAllSearchCmd() tea.Cmd {
 	}
 }
 
+// emptyTrashSearchCmd is like deleteAllSearchCmd but always targets Trash.
+func (m Model) emptyTrashSearchCmd() tea.Cmd {
+	folder := m.cfg.Folders.Trash
+	return func() tea.Msg {
+		uids, err := m.imapCli().SearchUIDs(nil, folder)
+		if err != nil {
+			return errMsg{err}
+		}
+		return deleteAllReadyMsg{uids: uids, folder: folder}
+	}
+}
+
 // deleteAllExecCmd permanently deletes all given UIDs from folder.
 func (m Model) deleteAllExecCmd(folder string, uids []uint32) tea.Cmd {
 	return func() tea.Msg {
@@ -1347,6 +1359,23 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.batchMoveCmd(targets, m.cfg.Folders.Trash))
+
+	case "X": // permanent delete (marked or cursor) — only in Trash
+		if m.activeFolder() != m.cfg.Folders.Trash {
+			m.status = "X only works in Trash. Use x to move to Trash first."
+			m.isError = true
+			return m, nil
+		}
+		targets := m.targetEmails()
+		if len(targets) == 0 {
+			return m, nil
+		}
+		var uids []uint32
+		for _, e := range targets {
+			uids = append(uids, e.UID)
+		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.deleteAllExecCmd(m.cfg.Folders.Trash, uids))
 
 	case "U": // clear all marks
 		m.markedUIDs = make(map[uint32]bool)

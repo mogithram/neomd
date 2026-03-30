@@ -58,6 +58,7 @@ var HelpSections = []HelpSection{
 		{"m", "mark / unmark email + advance cursor"},
 		{"U", "clear all marks"},
 		{"u", "undo last move or delete (reverses x, A, M* — not screener actions)"},
+		{"X  (Trash only)", "permanently delete marked or cursor email(s) — no undo"},
 	}},
 	{"Leader Key Mappings (space prefix)", [][2]string{
 		{"<space>1 … <space>9", "jump to folder tab by number (Inbox=1, ToScreen=2, …)"},
@@ -103,6 +104,7 @@ var HelpSections = []HelpSection{
 		{":reload  / :r", "reload current folder"},
 		{":check  / :ch", "show screener classification for selected email"},
 		{":delete-all  / :da", "permanently delete ALL emails in current folder (y/n)"},
+		{":empty-trash  / :et", "permanently delete ALL emails in Trash (y/n)"},
 		{":create-folders  / :cf", "create missing IMAP folders from config (safe, idempotent)"},
 		{":go-spam  / :spam", "open Spam folder (not in tab rotation)"},
 		{":quit  / :q", "quit neomd"},

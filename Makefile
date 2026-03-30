@@ -36,6 +36,10 @@ install: build
 	install -Dm755 $(BINARY) $(INSTALL)/$(BINARY)
 	@echo "Installed to $(INSTALL)/$(BINARY)"
 
+
+initialized-welcome-screen:
+	rm ~/.cache/neomd/welcome-shown
+
 ## test: run all tests
 test:
 	go test ./...

@@ -74,6 +74,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `m` | mark / unmark email + advance cursor |
 | `U` | clear all marks |
 | `u` | undo last move or delete (reverses x, A, M* — not screener actions) |
+| `X  (Trash only)` | permanently delete marked or cursor email(s) — no undo |
 
 
 ### Leader Key Mappings (space prefix)
@@ -135,6 +136,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `:reload  / :r` | reload current folder |
 | `:check  / :ch` | show screener classification for selected email |
 | `:delete-all  / :da` | permanently delete ALL emails in current folder (y/n) |
+| `:empty-trash  / :et` | permanently delete ALL emails in Trash (y/n) |
 | `:create-folders  / :cf` | create missing IMAP folders from config (safe, idempotent) |
 | `:go-spam  / :spam` | open Spam folder (not in tab rotation) |
 | `:quit  / :q` | quit neomd |

@@ -105,6 +105,15 @@ func init() {
 			},
 		},
 		{
+			name:    "empty-trash",
+			aliases: []string{"et"},
+			desc:    "permanently delete ALL emails in Trash (y/n confirmation)",
+			run: func(m *Model) (tea.Model, tea.Cmd) {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.emptyTrashSearchCmd())
+			},
+		},
+		{
 			name:    "create-folders",
 			aliases: []string{"cf"},
 			desc:    "create any missing IMAP folders defined in config (safe to run multiple times)",
