@@ -59,13 +59,13 @@ func renderEmailHeader(e *imap.Email, attachments []imap.Attachment, width int) 
 
 // readerHelp returns the one-line help string for the reader view.
 func readerHelp() string {
-	keys := []string{"j/k scroll", "space/d page", "h/q back", "r reply", "e nvim", "o w3m", "O browser", "ctrl+o web", "1-9 attachment", "? help"}
+	keys := []string{"j/k scroll", "space/d page", "h/q back", "r reply", "f fwd", "e nvim", "o w3m", "O browser", "ctrl+o web", "1-9 attachment", "? help"}
 	return styleHelp.Render("  " + strings.Join(keys, " · "))
 }
 
 // inboxHelp returns the one-line help string for the inbox view.
 func inboxHelp(folder string) string {
-	base := []string{"enter/l open", "r reply", "c compose", "I/O/F/P/A screen", "g goto", "M move", "/ filter", "R reload", "? help", "q quit"}
+	base := []string{"enter/l open", "r reply", "f fwd", "c compose", "I/O/F/P/A screen", "g goto", "M move", "/ filter", "R reload", "? help", "q quit"}
 	_ = folder
 	if folder == "ToScreen" {
 		base = []string{"I approve", "O block", "F feed", "P papertrail", "q back"}

@@ -102,6 +102,23 @@ func ReplyPrelude(to, cc, subject, originalFrom, originalBody string) string {
 	return s
 }
 
+// ForwardPrelude builds a quoted forward block. The To field is left empty for
+// the user to fill in.
+func ForwardPrelude(subject, originalFrom, originalDate, originalTo, originalBody string) string {
+	s := "# [neomd: to: ]\n"
+	if !strings.HasPrefix(strings.ToLower(subject), "fwd:") {
+		subject = "Fwd: " + subject
+	}
+	s += fmt.Sprintf("# [neomd: subject: %s]\n\n", subject)
+	s += "---------- Forwarded message ----------\n"
+	s += fmt.Sprintf("From: %s\n", originalFrom)
+	s += fmt.Sprintf("Date: %s\n", originalDate)
+	s += fmt.Sprintf("Subject: %s\n", subject)
+	s += fmt.Sprintf("To: %s\n\n", originalTo)
+	s += quoteLines(originalBody) + "\n"
+	return s
+}
+
 // ParseHeaders scans raw editor content for # [neomd: key: value] lines and
 // returns the extracted to, cc, bcc, subject values and the remaining body
 // (with header lines stripped). Any field not found is returned as "".

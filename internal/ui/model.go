@@ -163,6 +163,9 @@ type Model struct {
 	// Screener operations (I/O/F/P/$) are not undoable — they also modify .txt files.
 	undoStack [][]undoMove
 
+	// Forward: when true, bodyLoadedMsg launches forward editor instead of reader
+	pendingForward bool
+
 	// Chord prefix: "g" or "M" while waiting for second key
 	pendingKey string
 
@@ -878,12 +881,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openHTMLBody = msg.rawHTML
 		m.openWebURL = msg.webURL
 		m.openAttachments = msg.attachments
-		_ = loadEmailIntoReader(&m.reader, msg.email, msg.body, msg.attachments, m.cfg.UI.Theme, m.width)
-		m.state = stateReading
 		// Mark as seen in background (best-effort)
 		uid := msg.email.UID
 		folder := msg.email.Folder
 		go func() { _ = m.imapCli().MarkSeen(nil, folder, uid) }()
+		if m.pendingForward {
+			m.pendingForward = false
+			return m.launchForwardCmd()
+		}
+		_ = loadEmailIntoReader(&m.reader, msg.email, msg.body, msg.attachments, m.cfg.UI.Theme, m.width)
+		m.state = stateReading
 		return m, nil
 
 	case sendDoneMsg:
@@ -1491,6 +1498,15 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
 
+	case "f":
+		e := selectedEmail(m.inbox)
+		if e == nil {
+			return m, nil
+		}
+		m.pendingForward = true
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
+
 	case "m": // mark/unmark current email for batch, advance cursor
 		e := selectedEmail(m.inbox)
 		if e == nil {
@@ -1740,6 +1756,10 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		if m.openEmail != nil {
 			return m.launchReplyAllCmd()
+		}
+	case "f":
+		if m.openEmail != nil {
+			return m.launchForwardCmd()
 		}
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		idx := int(msg.String()[0]-'1') // 0-based
@@ -2229,6 +2249,54 @@ func (m Model) launchReplyCmd() (tea.Model, tea.Cmd) {
 
 func (m Model) launchReplyAllCmd() (tea.Model, tea.Cmd) {
 	return m.launchReplyWithCC("", true)
+}
+
+func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
+	e := m.openEmail
+	if e == nil {
+		return m, nil
+	}
+	subject := e.Subject
+	prelude := editor.ForwardPrelude(subject, e.From, e.Date.Format("Mon, 02 Jan 2006 15:04:05 -0700"), e.To, m.openBody)
+
+	f, err := os.CreateTemp("", "neomd-*.md")
+	if err != nil {
+		m.status = err.Error()
+		m.isError = true
+		return m, nil
+	}
+	tmpPath := f.Name()
+	f.WriteString(prelude) //nolint
+	f.Close()
+
+	editorBin := os.Getenv("EDITOR")
+	if editorBin == "" {
+		editorBin = "nvim"
+	}
+
+	cmd := exec.Command(editorBin, tmpPath)
+	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
+		defer os.Remove(tmpPath)
+		if execErr != nil {
+			return editorDoneMsg{err: execErr}
+		}
+		raw, readErr := os.ReadFile(tmpPath)
+		if readErr != nil {
+			return editorDoneMsg{err: readErr}
+		}
+		if string(raw) == prelude {
+			return editorDoneMsg{aborted: true}
+		}
+		pto, _, _, psubject, _ := editor.ParseHeaders(string(raw))
+		if psubject == "" {
+			if !strings.HasPrefix(strings.ToLower(subject), "fwd:") {
+				psubject = "Fwd: " + subject
+			} else {
+				psubject = subject
+			}
+		}
+		return editorDoneMsg{to: pto, cc: "", bcc: "", subject: psubject, body: string(raw)}
+	})
 }
 
 // launchReplyWithCC is the shared implementation for r (reply) and R (reply-all).
