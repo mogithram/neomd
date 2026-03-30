@@ -4,6 +4,7 @@ A minimal terminal email client for people who write in Markdown and live in Neo
 
 [Neomd](https://www.ssp.sh/brain/neomd/) is my way of implementing an email TUI based on my experience with Neomutt, focusing on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing in [Markdown](https://www.ssp.sh/brain/markdown) and navigating with [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions) with the GTD workflow and [HEY-Screener](https://www.hey.com/features/the-screener/).
 
+
 ## The philosophy behind Neomd: What's unique?
 
 The key here is **speed** in which you can **navigate, read, and process** your email. Everything is just a shortcut away, and instantly (ms not seconds). It's similar to the foundations that Superhuman was built on: it runs on Gmail and makes it fast with vim commands.
@@ -13,8 +14,13 @@ With the **HEY-Screener**, you get only emails in your inbox that you _screened 
 With the [GTD approach](https://www.ssp.sh/brain/getting-things-done-gtd), using folders such as next (inbox), waiting, someday, scheduled, or archive, you can move them with one shortcut. This allows you quickly to move emails you need to wait for, or deal with later, in the right category. **Processing your email only once**.
 
 With the additional **Feed** and **Papertrail**, two additional features from HEY, you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
+
+>**Note on Speed**: Startup: fetches headers via IMAP (fetchFolderCmd) — this takes a network round-trip (maybe 0.5-2s depending on server/connection), after that everything is in-memory and the navigation is instant. Applying IMAP calls such as switching folders and opening emails are typically around 100-500ms on a good connection.
+
 ## Screenshots
 
+  YouTube rundown of most features:
+  [![neomd demo](https://img.youtube.com/vi/lpmHqIrCC-w/maxresdefault.jpg)](https://youtu.be/lpmHqIrCC-w)
 ### Overview
 
 Feed view with all Newsletters - also workflow with differnt tabs and unread counter only for certain tabs (not all):
