@@ -183,12 +183,13 @@ See [SECURITY.md](SECURITY.md) for how credentials, screener lists, temp files, 
 - [kanagawa.nvim](https://github.com/rebelot/kanagawa.nvim) — the color palette used for the inbox
 - [msgvault](https://github.com/wesm/msgvault) — Go IMAP archiver; the IMAP client code in neomd is adapted from it
 
----
+## Disclaimer
 
-This TUI is mostly [vibe coded](https://www.ssp.sh/brain/vibe-coding), but I used my experience with neomutt, TUIs and workflow of handling emails with GTD with HEY Screener, and added some (hopefully) _taste_ using my favorite tools and astetics. Find the full history at [Twitter](https://xcancel.com/sspaeti/status/2036539855182627169#m) - inspired by seeing [Email.md](https://www.emailmd.dev/) on HackerNews.
+This TUI is mostly [vibe-coded](https://www.ssp.sh/brain/vibe-coding) in the sense that all code is written with Claude Code, but guided by very detailed instructions to make the workflow as I use it and like it to be.
 
-If you [rather read the prompt](https://www.ssp.sh/brain/id-rather-read-the-prompt), check out my [initial prompt](_prompts/prompt.md) and its generated [plan](_prompts/prompt-plan.md) by Claude Code.
+I used my experience with Neomutt, TUIs, and the GTD workflow for handling emails with HEY Screener, and added some (hopefully) _taste_ using my favorite tools and aesthetics. Find the full history at [Twitter](https://xcancel.com/sspaeti/status/2036539855182627169#m) - inspired by seeing [Email.md](https://www.emailmd.dev/) on HackerNews.
 
+If you [rather read the prompt](https://www.ssp.sh/brain/id-rather-read-the-prompt), check out my [initial prompt](_prompts/prompt.md) and its generated [plan](_prompts/prompt-plan.md) - which I have iterated and added features by the 100s since then.
 ## Roadmap
 
 See at my second brain at [Roadmap](https://www.ssp.sh/brain/neomd#roadmap).

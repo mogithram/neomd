@@ -82,3 +82,6 @@ Email-extracted URLs (from `ctrl+o` / `List-Post` header) are validated before b
 ## Reporting a vulnerability
 
 Open a [GitHub issue](https://github.com/ssp-data/neomd/issues) or email the maintainer directly (address in the commit history). neomd is a personal tool with no release SLA, but security reports are taken seriously and addressed promptly.
+
+## Disclaimer
+This security audit is instructed by me, checking all relevant folders, but executed by Claude Code.
