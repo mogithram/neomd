@@ -23,12 +23,12 @@ from     = "Me <me@example.com>"
 # account = "Personal"   # must match the name = field of an [[accounts]] block
 
 [screener]
-# reuse your existing neomutt allowlist files
-screened_in  = "~/.dotfiles/neomd/.lists/screened_in.txt"
-screened_out = "~/.dotfiles/neomd/.lists/screened_out.txt"
-feed         = "~/.dotfiles/neomd/.lists/feed.txt"
-papertrail   = "~/.dotfiles/neomd/.lists/papertrail.txt"
-spam         = "~/.dotfiles/neomd/.lists/spam.txt"
+# default: ~/.config/neomd/lists/ — or reuse existing neomutt lists
+screened_in  = "~/.config/neomd/lists/screened_in.txt"
+screened_out = "~/.config/neomd/lists/screened_out.txt"
+feed         = "~/.config/neomd/lists/feed.txt"
+papertrail   = "~/.config/neomd/lists/papertrail.txt"
+spam         = "~/.config/neomd/lists/spam.txt"
 
 [folders]
 inbox        = "INBOX"

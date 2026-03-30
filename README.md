@@ -75,6 +75,8 @@ Compose emails in your editor, read them rendered with [glamour](https://github.
 
 ## Install
 
+**Prerequisites:** [Go 1.22+](https://go.dev/doc/install) and `make`.
+
 ```sh
 git clone https://github.com/sspaeti/neomd
 cd neomd
@@ -87,6 +89,11 @@ Or just build locally:
 make build
 ./neomd
 ```
+
+On first run, neomd:
+1. Creates `~/.config/neomd/config.toml` with placeholders — fill in your IMAP/SMTP credentials
+2. Creates `~/.config/neomd/lists/` for screener allowlists (or uses your custom paths from config)
+3. Creates any missing IMAP folders (ToScreen, Feed, PaperTrail, etc.) automatically
 
 ## Configuration
 
@@ -102,11 +109,11 @@ password = "app-password"
 from     = "Me <me@example.com>"
 
 [screener]
-screened_in  = "~/.dotfiles/neomd/.lists/screened_in.txt"
-screened_out = "~/.dotfiles/neomd/.lists/screened_out.txt"
-feed         = "~/.dotfiles/neomd/.lists/feed.txt"
-papertrail   = "~/.dotfiles/neomd/.lists/papertrail.txt"
-spam         = "~/.dotfiles/neomd/.lists/spam.txt"
+screened_in  = "~/.config/neomd/lists/screened_in.txt"
+screened_out = "~/.config/neomd/lists/screened_out.txt"
+feed         = "~/.config/neomd/lists/feed.txt"
+papertrail   = "~/.config/neomd/lists/papertrail.txt"
+spam         = "~/.config/neomd/lists/spam.txt"
 ```
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.

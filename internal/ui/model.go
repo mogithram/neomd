@@ -295,6 +295,7 @@ func (m Model) imapCli() *imap.Client {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
+		m.ensureFoldersCmd(), // create any missing IMAP folders on first run
 		m.fetchFolderCmd(m.activeFolder()),
 		m.scheduleBgSync(),
 	)

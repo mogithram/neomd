@@ -163,6 +163,27 @@ func HistoryPath() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("neomd_%d_cmd_history", os.Getuid()))
 }
 
+// welcomePath returns the path of the first-run marker file.
+func welcomePath() string {
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "neomd", "welcome-shown")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("neomd_%d_welcome", os.Getuid()))
+}
+
+// IsFirstRun returns true if the welcome marker has not been written yet.
+func IsFirstRun() bool {
+	_, err := os.Stat(welcomePath())
+	return os.IsNotExist(err)
+}
+
+// MarkWelcomeShown creates the marker so IsFirstRun returns false next time.
+func MarkWelcomeShown() {
+	p := welcomePath()
+	_ = os.MkdirAll(filepath.Dir(p), 0700)
+	_ = os.WriteFile(p, []byte("1"), 0600)
+}
+
 // Load reads config from path (or default location if path is empty).
 // If no config exists, returns a placeholder config and prints a hint.
 func Load(path string) (*Config, error) {
@@ -190,6 +211,17 @@ func Load(path string) (*Config, error) {
 	cfg.Screener.PaperTrail = expandPath(cfg.Screener.PaperTrail)
 	cfg.Screener.Spam = expandPath(cfg.Screener.Spam)
 
+	// Ensure screener list directories exist so appending (I/O/F/P/$) works
+	// on a fresh install without manual mkdir.
+	for _, p := range []string{
+		cfg.Screener.ScreenedIn, cfg.Screener.ScreenedOut,
+		cfg.Screener.Feed, cfg.Screener.PaperTrail, cfg.Screener.Spam,
+	} {
+		if p != "" {
+			_ = os.MkdirAll(filepath.Dir(p), 0700)
+		}
+	}
+
 	for i := range cfg.Accounts {
 		cfg.Accounts[i].Password = expandEnv(cfg.Accounts[i].Password)
 		cfg.Accounts[i].User = expandEnv(cfg.Accounts[i].User)
@@ -202,7 +234,7 @@ func Load(path string) (*Config, error) {
 
 func defaults() *Config {
 	home, _ := os.UserHomeDir()
-	muttDir := filepath.Join(home, ".config", "mutt")
+	listsDir := filepath.Join(home, ".config", "neomd", "lists")
 	return &Config{
 		Accounts: []AccountConfig{
 			{
@@ -212,11 +244,11 @@ func defaults() *Config {
 			},
 		},
 		Screener: ScreenerConfig{
-			ScreenedIn:  filepath.Join(muttDir, "screened_in.txt"),
-			ScreenedOut: filepath.Join(muttDir, "screened_out.txt"),
-			Feed:        filepath.Join(muttDir, "feed.txt"),
-			PaperTrail:  filepath.Join(muttDir, "papertrail.txt"),
-			Spam:        filepath.Join(muttDir, "spam.txt"),
+			ScreenedIn:  filepath.Join(listsDir, "screened_in.txt"),
+			ScreenedOut: filepath.Join(listsDir, "screened_out.txt"),
+			Feed:        filepath.Join(listsDir, "feed.txt"),
+			PaperTrail:  filepath.Join(listsDir, "papertrail.txt"),
+			Spam:        filepath.Join(listsDir, "spam.txt"),
 		},
 		Folders: FoldersConfig{
 			Inbox:       "INBOX",
