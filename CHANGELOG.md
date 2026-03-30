@@ -7,9 +7,19 @@
 - **Attachment column in inbox** — `@` appears in a dedicated column next to the date when an email has attachments (detected from IMAP BODYSTRUCTURE including inline images)
 - **Attachment downloads in reader** — the email header now lists all attachments as `[1] report.pdf  [2] photo.png`; press `1`–`9` to download attachment N to `~/Downloads/` and open it with `xdg-open`; filenames are deduplicated automatically
 - **Inline images as downloads** — images embedded inline in emails (`Content-Disposition: inline`, e.g. PNG screenshots) are now shown alongside regular attachments in the reader header and downloadable with `1`–`9`; previously only `Content-Disposition: attachment` parts were listed
+- **Inline image placeholders in reader body** — `<img src="cid:...">` tags now show `[Image: filename.png]` at their position in the body text instead of being silently stripped; uses Content-ID → filename mapping from MIME parts
 - **Undo move / delete** — `u` reverses the last single or batch move/delete (`x`, `A`, `M*`); uses the UIDPLUS destination UID so undo still works even when the server reassigns UIDs on MOVE; screener actions (`I`, `O`, `F`, `P`, `$`) are intentionally excluded because they also modify `.txt` list files
 - **Subject (and headers) re-parsed from editor** — editing `# [neomd: subject: ...]`, `# [neomd: to: ...]`, etc. in neovim now correctly updates those fields; previously the values were captured in a closure before the editor opened and changes were silently discarded; all three editor entry points (new compose, reply, continue draft) now call `editor.ParseHeaders` on the saved file content
 - **`ctrl+f` for cycling From** — changed from `f` (which conflicts with typing in text fields) to `ctrl+f`; works in both the compose form and the pre-send review screen
+- **Forward (`f`)** — forward an email from the reader or inbox; opens the editor with the original message quoted, `Fwd:` subject prefix, and empty `To:` field; from inbox the body is fetched automatically before opening the editor
+- **Permanent delete (`X`, Trash only)** — permanently deletes marked or cursor email(s) from the Trash folder via IMAP STORE `\Deleted` + UID EXPUNGE; blocked in other folders with a warning message
+- **`:empty-trash` / `:et`** — permanently delete all emails in Trash with y/n confirmation; works from any folder without navigating to Trash first
+- **First-run welcome popup** — on the very first launch, a centered popup shows quick-start keybindings and screener basics; any key dismisses it; marker at `~/.cache/neomd/welcome-shown` ensures it only appears once
+- **Auto-create IMAP folders on startup** — `ensureFoldersCmd` runs during `Init()` so new users don't need to manually run `:create-folders`; idempotent for existing users
+- **Auto-create screener list directories** — parent directories for screener list paths are created automatically during config load; prevents errors when pressing `I`/`O`/`F`/`P` on a fresh install
+- **Default screener paths** — changed from `~/.config/mutt/` to `~/.config/neomd/lists/` for new installs; existing configs with custom paths are unaffected
+- **Go prerequisite check in Makefile** — `make build`/`make install` now prints clear Go installation instructions instead of a cryptic error when `go` is not found
+- **Docs restructure** — detailed documentation moved from README to `docs/` folder: `docs/keybindings.md` (auto-generated), `docs/screener.md`, `docs/sending.md`, `docs/configuration.md`; README kept concise with links
 
 ## 2026-03-29
 
