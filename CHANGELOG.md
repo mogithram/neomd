@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-03-31
+- fix showing recipient in SENT tab (instead of from)
 - **IMAP search across all folders (`space /` or `:search`)** — server-side IMAP SEARCH across all configured folders (Inbox, Sent, Archive, Feed, etc.); results displayed in a temporary "Search" tab with `[Folder]` prefix on each subject; supports query prefixes: `from:simon`, `subject:invoice`, `to:team@`, or plain text to search all three fields; press `esc` to close results
 - **Filter preserves across actions** — the local `/` filter no longer clears when pressing `n` (toggle read), `m` (mark), `U` (clear marks), or sorting; filter stays active until `esc`
 - **Address autocomplete in compose** — To, Cc, and Bcc fields show autocomplete suggestions from screener lists (`screened_in.txt`, `feed.txt`, `papertrail.txt`); navigate with `ctrl+n`/`ctrl+p`/arrows, accept with `tab`; supports multi-address fields (autocomplete applies after the last comma)
