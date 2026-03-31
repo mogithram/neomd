@@ -57,8 +57,8 @@ var HelpSections = []HelpSection{
 	}},
 	{"Multi-select", [][2]string{
 		{"m", "mark / unmark email + advance cursor"},
-		{"U", "clear all marks"},
-		{"u", "undo last move or delete (reverses x, A, M* — not screener actions)"},
+		{"ctrl+u", "clear all marks"},
+		{"U", "undo last move or delete (reverses x, A, M* — not screener actions)"},
 		{"X  (Trash only)", "permanently delete marked or cursor email(s) — no undo"},
 	}},
 	{"Leader Key Mappings (space prefix)", [][2]string{

@@ -1412,11 +1412,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.deleteAllExecCmd(m.cfg.Folders.Trash, uids))
 
-	case "U": // clear all marks
+	case "ctrl+u": // clear all marks
 		m.markedUIDs = make(map[uint32]bool)
 		return m, m.applyFilter()
 
-	case "u": // undo last move/delete
+	case "U": // undo last move/delete
 		if len(m.undoStack) == 0 {
 			m.status = "Nothing to undo."
 			return m, nil
