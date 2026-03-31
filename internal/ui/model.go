@@ -840,7 +840,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listH = 5
 		}
 		if m.inbox.Width() == 0 {
-			m.inbox = newInboxList(msg.Width, listH)
+			m.inbox = newInboxList(msg.Width, listH, m.cfg.Folders.Sent)
 		} else {
 			m.inbox.SetSize(msg.Width, listH)
 		}
