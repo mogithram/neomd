@@ -47,6 +47,33 @@ Attach:  [1] report.pdf  [2] photo.png
 
 Press `1`–`9` to download attachment N to `~/Downloads/` and open it with `xdg-open`. Filenames are deduplicated automatically if a file already exists.
 
+## Threaded Inbox
+
+Related emails are automatically grouped together in the inbox list. Threads are detected using a hybrid approach:
+
+1. **Message-ID / In-Reply-To headers** — proper RFC 2822 threading chain
+2. **Subject + participant fallback** — emails with the same normalized subject (stripped of `Re:`, `Fwd:`, etc.) and overlapping participants (From/To) are grouped together
+
+Threads display with a Twitter-style vertical connector line:
+
+```
+  1   17:43  │ rafaelxxxxxxxxxxx@g…  Re: Re: AUR Neomd              (12K)
+  2   16:30  ╰ rafaelxxxxxxxxxxx@g…  Re: AUR Neomd                  (10K)
+  3 N 19:50  │ Bla blabla   via Li…  Jenna just messaged you        (38K)
+  4 N 18:53  │ Bla blabla   via Li…  Jenna just messaged you        (38K)
+  5 N 17:59  ╰ Bla blabla   via Li…  Jenna just messaged you        (38K)
+  6   18:46    LinkedIn              tom Weller replied to ...      (45K)
+```
+
+- `│` connects thread members (newest on top)
+- `╰` marks the root/oldest email at the bottom of each thread
+- Non-threaded emails show no connector (clean, no visual noise)
+- Threads are sorted by their most recent email, so active conversations float to the top
+
+Or as image:
+![neomd](../images/reader-threaded.png)
+
+
 ## Replying, Forwarding, and Drafts
 
 | Key | Action |

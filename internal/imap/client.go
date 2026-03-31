@@ -42,6 +42,8 @@ type Email struct {
 	Folder        string
 	Size          uint32 // RFC822 size in bytes
 	HasAttachment bool   // true if BODYSTRUCTURE contains an attachment part
+	MessageID     string // Message-ID from envelope (for threading)
+	InReplyTo     string // first In-Reply-To message ID (for threading)
 }
 
 // Config holds connection parameters.
@@ -242,6 +244,10 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 				}
 				if len(m.Envelope.ReplyTo) > 0 {
 					e.ReplyTo = m.Envelope.ReplyTo[0].Addr()
+				}
+				e.MessageID = m.Envelope.MessageID
+				if len(m.Envelope.InReplyTo) > 0 {
+					e.InReplyTo = m.Envelope.InReplyTo[0]
 				}
 			}
 			e.Size = uint32(m.RFC822Size)

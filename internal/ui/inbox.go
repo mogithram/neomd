@@ -14,9 +14,10 @@ import (
 
 // emailItem wraps imap.Email to satisfy bubbles/list.Item.
 type emailItem struct {
-	email  imap.Email
-	index  int  // position in list (1-based)
-	marked bool // selected for batch operation
+	email        imap.Email
+	index        int    // position in list (1-based)
+	marked       bool   // selected for batch operation
+	threadPrefix string // tree chars e.g. "┌─>" for threaded display
 }
 
 func (e emailItem) FilterValue() string {
@@ -39,6 +40,7 @@ func (d emailDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 const (
 	colNumWidth    = 4 // "  1 "
 	colFlagWidth   = 2 // "N " or "  "
+	colThreadWidth = 2 // "│ " or "╰ " or "  "
 	colDateWidth   = 7 // "Feb 03 "
 	colAttachWidth = 2 // "@ " or "  "
 	colSizeWidth   = 7 // "(38.2K)"
@@ -70,6 +72,11 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	case unread:
 		flag = "N "
 	}
+	// Thread connector column
+	threadStr := "  "
+	if e.threadPrefix != "" {
+		threadStr = e.threadPrefix + " "
+	}
 	dateStr := fmtDate(e.email.Date) + " "
 	attachStr := "  "
 	if e.email.HasAttachment {
@@ -77,7 +84,7 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	}
 	sizeStr := fmtSize(e.email.Size)
 
-	fixed := colNumWidth + colFlagWidth + colDateWidth + colAttachWidth + colSizeWidth + 2 // 2 spaces padding
+	fixed := colNumWidth + colFlagWidth + colThreadWidth + colDateWidth + colAttachWidth + colSizeWidth + 2 // 2 spaces padding
 	fromMax := 20
 	subjectMax := width - fixed - fromMax - 2
 	if subjectMax < 8 {
@@ -92,8 +99,8 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	subject := truncate(e.email.Subject, subjectMax)
 
 	if isSelected {
-		row := fmt.Sprintf("%s%s%s%s%-*s  %-*s  %s",
-			num, flag, dateStr, attachStr,
+		row := fmt.Sprintf("%s%s%s%s%s%-*s  %-*s  %s",
+			num, flag, threadStr, dateStr, attachStr,
 			fromMax, from,
 			subjectMax, subject,
 			sizeStr,
@@ -113,6 +120,7 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	default:
 		flagS = lipgloss.NewStyle().Foreground(colorMuted).Render(flag)
 	}
+	threadS := lipgloss.NewStyle().Foreground(colorBorder).Render(threadStr)
 	dateS := lipgloss.NewStyle().Foreground(colorDateCol).Render(dateStr)
 	attachS := lipgloss.NewStyle().Foreground(colorDateCol).Render(attachStr)
 
@@ -126,7 +134,7 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	subS := subStyle.Render(fmt.Sprintf("%-*s", subjectMax, subject))
 	sizeS := lipgloss.NewStyle().Foreground(colorSizeCol).Render(sizeStr)
 
-	fmt.Fprint(w, numS+flagS+dateS+attachS+fromS+"  "+subS+"  "+sizeS)
+	fmt.Fprint(w, numS+flagS+threadS+dateS+attachS+fromS+"  "+subS+"  "+sizeS)
 }
 
 // cleanFrom strips the <addr> part when a display name is present.
@@ -195,10 +203,18 @@ func newInboxList(width, height int, sentFolder string) list.Model {
 }
 
 // setEmails replaces the list contents, preserving marked state.
+// It threads emails before display — grouped conversations appear together
+// with tree-drawing prefixes (┌─>) on reply rows.
 func setEmails(l *list.Model, emails []imap.Email, marked map[uint32]bool) tea.Cmd {
-	items := make([]list.Item, len(emails))
-	for i, e := range emails {
-		items[i] = emailItem{email: e, index: i + 1, marked: marked[e.UID]}
+	threaded := threadEmails(emails)
+	items := make([]list.Item, len(threaded))
+	for i, te := range threaded {
+		items[i] = emailItem{
+			email:        te.email,
+			index:        i + 1,
+			marked:       marked[te.email.UID],
+			threadPrefix: te.threadPrefix,
+		}
 	}
 	return l.SetItems(items)
 }

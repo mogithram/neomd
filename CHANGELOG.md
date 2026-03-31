@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-03-31
+- **Threaded inbox** — related emails are automatically grouped in the inbox list with a Twitter-style vertical connector line (`│`/`╰`); threads detected via `In-Reply-To`/`Message-ID` IMAP envelope headers with a normalized-subject + participant overlap fallback; newest reply on top, root at bottom; threads sorted by most recent email so active conversations float to the top; thread connector colored subtly in the Kanagawa border color
 - fix showing recipient in SENT tab (instead of from)
 - **IMAP search across all folders (`space /` or `:search`)** — server-side IMAP SEARCH across all configured folders (Inbox, Sent, Archive, Feed, etc.); results displayed in a temporary "Search" tab with `[Folder]` prefix on each subject; supports query prefixes: `from:simon`, `subject:invoice`, `to:team@`, or plain text to search all three fields; press `esc` to close results
 - **Filter preserves across actions** — the local `/` filter no longer clears when pressing `n` (toggle read), `m` (mark), `U` (clear marks), or sorting; filter stays active until `esc`
