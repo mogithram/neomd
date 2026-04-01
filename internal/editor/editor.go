@@ -6,9 +6,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// tempDir returns /tmp/neomd/, creating it if needed.
+func tempDir() string {
+	dir := filepath.Join(os.TempDir(), "neomd")
+	os.MkdirAll(dir, 0700) //nolint
+	return dir
+}
 
 var neomdHeaderRe = regexp.MustCompile(`^# \[neomd: (\w+): (.*)\]$`)
 
@@ -17,7 +25,7 @@ var neomdHeaderRe = regexp.MustCompile(`^# \[neomd: (\w+): (.*)\]$`)
 // The caller is responsible for suspending/resuming the bubbletea program
 // around this call (via tea.ExecProcess or tea.Suspend/Resume).
 func Compose(prelude string) (string, error) {
-	f, err := os.CreateTemp("", "neomd-*.md")
+	f, err := os.CreateTemp(tempDir(), "neomd-*.md")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
@@ -54,7 +62,7 @@ func Compose(prelude string) (string, error) {
 // The caller is responsible for suspending/resuming the bubbletea program via
 // tea.ExecProcess. Returns the command and the temp file path (caller removes it).
 func View(content string) (*exec.Cmd, string, error) {
-	f, err := os.CreateTemp("", "neomd-read-*.md")
+	f, err := os.CreateTemp(tempDir(), "neomd-read-*.md")
 	if err != nil {
 		return nil, "", fmt.Errorf("create temp file: %w", err)
 	}

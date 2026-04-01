@@ -95,6 +95,15 @@ type (
 	}
 )
 
+// neomdTempDir returns /tmp/neomd/, creating it if needed.
+// Using a dedicated subdirectory keeps temp files discoverable (e.g. recovering
+// a draft after a crash) and avoids cluttering /tmp/.
+func neomdTempDir() string {
+	dir := filepath.Join(os.TempDir(), "neomd")
+	os.MkdirAll(dir, 0700) //nolint
+	return dir
+}
+
 // pendingSendData holds a composed message waiting in the pre-send review screen.
 type pendingSendData struct {
 	to, cc, bcc, subject, body string
@@ -1961,7 +1970,7 @@ func (m Model) openInBrowser() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	f, err := os.CreateTemp("", "neomd-view-*.html")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-view-*.html")
 	if err != nil {
 		m.status = "open: " + err.Error()
 		m.isError = true
@@ -2008,7 +2017,7 @@ func (m Model) openInW3m() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	f, err := os.CreateTemp("", "neomd-view-*.html")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-view-*.html")
 	if err != nil {
 		m.status = "open: " + err.Error()
 		m.isError = true
@@ -2173,7 +2182,7 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 	prelude := editor.Prelude(to, cc, subject, "")
 	body := m.openBody
 
-	f, err := os.CreateTemp("", "neomd-*.md")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
 		m.status = "continueDraft: " + err.Error()
 		m.isError = true
@@ -2293,6 +2302,9 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		_ = prelude
 		return m.launchEditorCmd()
+	case "s":
+		// Open in nvim with spell checking, cursor on first error.
+		return m.launchSpellCheckCmd(ps)
 	case "d":
 		// Save to Drafts without sending.
 		return m, m.saveDraftCmd(m.presendFrom(), ps.to, ps.cc, ps.subject, ps.body, m.attachments)
@@ -2320,6 +2332,56 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// launchSpellCheckCmd opens the composed email body in nvim with spell checking
+// enabled and the cursor positioned on the first misspelled word.
+// On return, the (possibly corrected) body replaces the pre-send body.
+func (m Model) launchSpellCheckCmd(ps *pendingSendData) (tea.Model, tea.Cmd) {
+	prelude := editor.Prelude(ps.to, ps.cc, ps.subject, "")
+	content := prelude + ps.body
+
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
+	if err != nil {
+		m.status = "spellcheck: " + err.Error()
+		m.isError = true
+		return m, nil
+	}
+	tmpPath := f.Name()
+	f.WriteString(content) //nolint
+	f.Close()
+
+	// Open nvim with spell on and jump to first misspelled word.
+	// VimEnter + defer_fn ensures spell activates AFTER all plugins load.
+	cmd := exec.Command("nvim",
+		"-c", `autocmd VimEnter * ++once lua vim.defer_fn(function() vim.wo.spell = true; vim.bo.spelllang = "en_us,de"; vim.cmd("normal! gg]s") end, 100)`,
+		tmpPath,
+	)
+	m.state = stateCompose
+	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
+		defer os.Remove(tmpPath)
+		if execErr != nil {
+			return editorDoneMsg{err: execErr}
+		}
+		raw, readErr := os.ReadFile(tmpPath)
+		if readErr != nil {
+			return editorDoneMsg{err: readErr}
+		}
+		pto, pcc, pbcc, psubject, _ := editor.ParseHeaders(string(raw))
+		if pto == "" {
+			pto = ps.to
+		}
+		if pcc == "" {
+			pcc = ps.cc
+		}
+		if pbcc == "" {
+			pbcc = ps.bcc
+		}
+		if psubject == "" {
+			psubject = ps.subject
+		}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, subject: psubject, body: string(raw)}
+	})
+}
+
 // previewInBrowser renders the composed email as HTML (same pipeline as sending)
 // and opens it in $BROWSER so the user can verify images and formatting.
 func (m Model) previewInBrowser() (tea.Model, tea.Cmd) {
@@ -2340,7 +2402,7 @@ func (m Model) previewInBrowser() (tea.Model, tea.Cmd) {
 	// treat as server-relative; file:///abs/path loads from disk.
 	htmlBody = strings.ReplaceAll(htmlBody, `src="/`, `src="file:///`)
 
-	f, err := os.CreateTemp("", "neomd-preview-*.html")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-preview-*.html")
 	if err != nil {
 		m.status = "preview: " + err.Error()
 		m.isError = true
@@ -2388,7 +2450,7 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 	prelude := editor.Prelude(to, cc, subject, m.cfg.UI.Signature)
 
 	// Write temp file
-	f, err := os.CreateTemp("", "neomd-*.md")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
 		m.status = err.Error()
 		m.isError = true
@@ -2449,7 +2511,7 @@ func (m Model) launchAttachPickerCmd() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	chooserFile, err := os.CreateTemp("", "neomd-pick-*.txt")
+	chooserFile, err := os.CreateTemp(neomdTempDir(), "neomd-pick-*.txt")
 	if err != nil {
 		m.status = "attach: " + err.Error()
 		return m, nil
@@ -2490,7 +2552,7 @@ func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
 	subject := e.Subject
 	prelude := editor.ForwardPrelude(subject, e.From, e.Date.Format("Mon, 02 Jan 2006 15:04:05 -0700"), e.To, m.openBody)
 
-	f, err := os.CreateTemp("", "neomd-*.md")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
 		m.status = err.Error()
 		m.isError = true
@@ -2567,7 +2629,7 @@ func (m Model) launchReplyWithCC(extraCC string, replyAll bool) (tea.Model, tea.
 
 	prelude := editor.ReplyPrelude(to, cc, subject, e.From, m.openBody)
 
-	f, err := os.CreateTemp("", "neomd-*.md")
+	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
 		m.status = err.Error()
 		m.isError = true
@@ -2758,7 +2820,7 @@ func (m Model) viewPresend() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(styleHelp.Render("  enter send · p preview · ctrl+f from · ctrl+b cc/bcc · a attach · D remove last · d draft · e edit · esc cancel"))
+	b.WriteString(styleHelp.Render("  enter send · s spell · p preview · ctrl+f from · ctrl+b cc/bcc · a attach · D remove last · d draft · e edit · esc cancel"))
 	return b.String()
 }
 
