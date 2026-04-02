@@ -60,6 +60,8 @@ Your Title, Your Company
 Connect: [LinkedIn](https://example.com/)"""
 ```
 
+> **Gmail users:** Gmail uses different IMAP folder names (`[Gmail]/Sent Mail`, `[Gmail]/Trash`, etc.). See [Gmail Configuration](gmail.md) for the correct mapping.
+
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.
 
 Credentials are stored only in `~/.config/neomd/config.toml` (mode 0600) and never written elsewhere; all IMAP connections use TLS (port 993) or STARTTLS (port 143).
