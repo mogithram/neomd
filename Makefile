@@ -4,7 +4,7 @@ INSTALL := $(HOME)/.local/bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build run install clean test send-test vet fmt tidy release docs help check-go demo demo-reset
+.PHONY: build run install clean test send-test vet fmt tidy release docs help check-go demo demo-reset benchmark
 
 ## check-go: verify Go is installed
 check-go:

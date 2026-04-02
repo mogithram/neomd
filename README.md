@@ -4,6 +4,7 @@ A minimal terminal email client for people who write in Markdown and live in Neo
 
 [Neomd](https://www.ssp.sh/brain/neomd/) is my way of implementing an email TUI based on my experience with Neomutt, focusing on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing in [Markdown](https://www.ssp.sh/brain/markdown) and navigating with [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions) with the GTD workflow and [HEY-Screener](https://www.hey.com/features/the-screener/).
 
+> ⚠️ **Warning:** neomd moves, deletes, and modifies emails directly on your IMAP server. These operations affect your mailbox across all devices. **Back up important emails before first use.** neomd is experimental software and can't take responsibility for lost or misplaced emails. Consider testing with a secondary email account first.
 
 ## The philosophy behind Neomd: What's unique?
 
@@ -15,7 +16,7 @@ With the [GTD approach](https://www.ssp.sh/brain/getting-things-done-gtd), using
 
 With the additional **Feed** and **Papertrail**, two additional features from HEY, you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
 
->**Note on Speed**: Startup fetches headers via IMAP — this takes a network round-trip (0.5-2s depending on server), after that everything is in-memory and navigation is instant. IMAP calls (switching folders, opening emails) are typically ~50-150ms on dedicated providers like Hostpoint, Fastmail, or HEY. **Gmail's IMAP is significantly slower** (~200-500ms per command) due to its label-to-folder translation layer — expect 1-2s for folder switches. This is a Gmail limitation, not neomd. For the fastest experience, use a dedicated email provider.
+>**Note on Speed**: neomd's speed depends entirely on your IMAP provider. On Hostpoint (the provider I use), a folder switch takes **~33ms** which feels instant. On Gmail, the same operation takes **~570ms** which is noticeably slow. See [Benchmark](#benchmark) for full details and how to test your provider.
 
 ## Screenshots
 
@@ -106,7 +107,6 @@ Or if on Arch Linux (AUR), you can use my [neomd-bin](https://aur.archlinux.org/
 yay -S neomd-bin
 ```
 
-> ⚠️ **Warning:** neomd moves, deletes, and modifies emails directly on your IMAP server. These operations are real and affect your mailbox across all devices. **Back up important emails before first use.** neomd is experimental software and I can't take responsibility for lost or misplaced emails. Consider testing with a secondary email account first.
 
 On first run, neomd:
 1. Creates `~/.config/neomd/config.toml` with placeholders — fill in your IMAP/SMTP credentials
@@ -204,6 +204,35 @@ make help     print this list
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new.
+
+## Benchmark
+
+neomd's responsiveness depends entirely on your IMAP server. Every folder switch, email open, and move requires IMAP round-trips (SELECT + UID SEARCH + FETCH). Here are real measurements from the same machine, same network:
+
+**Hostpoint** (dedicated email provider) — folder switch: **~33ms total**
+| Operation | Time |
+|-----------|------|
+| SELECT | 12ms |
+| UID SEARCH | 10ms |
+| FETCH (200 emails) | 76ms |
+| MOVE (1 email) | 46ms |
+
+**Gmail** — folder switch: **~570ms total** (17x slower)
+| Operation | Time |
+|-----------|------|
+| SELECT | 200ms |
+| UID SEARCH | 180ms |
+| FETCH (2 emails) | 190ms |
+| MOVE (1 email) | 339ms |
+
+Interestingly, Gmail benchmarks fast on a **fresh single connection** (`scripts/imap-benchmark.sh` shows ~70ms total, same as Hostpoint). But on a **sustained session** with sequential commands — which is how neomd actually uses IMAP — Gmail adds ~180ms latency per command. This is likely Gmail's internal label-to-folder translation and session management overhead. The result: every action in neomd feels much slower on Gmail, while Hostpoint stays instant.
+
+> **Gmail is not recommended.** If you're on Gmail, consider a dedicated email provider (Hostpoint, Fastmail, HEY, Migadu, etc.) for the best neomd experience. Or use Gmail just for fun :).
+
+**Test your own provider:**
+```bash
+IMAP_HOST=imap.example.com IMAP_USER=me@example.com IMAP_PASS=secret ./scripts/imap-benchmark.sh
+```
 
 ## Security
 

@@ -2,6 +2,10 @@
 
 # 2026-04-02
 - **Auto From on reply** — replying auto-selects the From address that matches the email's To/CC field (e.g. email sent to `simon@domain.com` replies from `simon@domain.com`); `r` now works from inbox list view; `# [neomd: from: ...]` shown in editor; `x` in pre-send discards the email
+- **Email safety hardening** — bulk operations show live progress counter ("Screening: 42/1000…") for batches >10; screener now moves emails before updating list files (no inconsistent state on failure); SaveSent failure shown as warning instead of silently swallowed; batch failures report exact moved/total counts; partial batch undo info preserved on error; undo stack capped at 20
+- **Screener lists created on startup** — all 5 screener `.txt` files are created as empty files on first run (alongside directories), consistent with IMAP folder creation
+- **Config-isolated cache** — demo and production configs use separate cache directories (derived from config dir name), so `make demo-reset` never touches production data
+- Added benchmark to readme as Gmail was considerly slower than my IMAP provider here from Switzerland.
 
 # 2026-04-01
 - **Threaded inbox** — related emails are automatically grouped in the inbox list with a Twitter-style vertical connector line (`│`/`╰`); threads detected via `In-Reply-To`/`Message-ID` IMAP envelope headers with a reply-prefix subject fallback (only emails with `Re:`, `AW:`, `Fwd:` etc. are grouped by subject — recurring notifications/invoices stay separate); newest reply on top, root at bottom; threads sorted by most recent email so active conversations float to the top
