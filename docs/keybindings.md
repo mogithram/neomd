@@ -66,6 +66,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `Mo` | move to ScreenedOut |
 | `Mw` | move to Waiting |
 | `Mm` | move to Someday |
+| `Mk` | move to ToScreen |
 
 
 ### Multi-select & Undo

@@ -54,6 +54,7 @@ var HelpSections = []HelpSection{
 		{"Mo", "move to ScreenedOut"},
 		{"Mw", "move to Waiting"},
 		{"Mm", "move to Someday"},
+		{"Mk", "move to ToScreen"},
 	}},
 	{"Multi-select & Undo", [][2]string{
 		{"m", "mark / unmark email + advance cursor"},

@@ -4,7 +4,7 @@ INSTALL := $(HOME)/.local/bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build run install clean test send-test vet fmt tidy release docs help check-go demo demo-reset benchmark
+.PHONY: build run install clean test send-test vet fmt tidy release docs help check-go demo demo-reset demo-hp demo-hp-reset benchmark
 
 ## check-go: verify Go is installed
 check-go:
@@ -44,6 +44,14 @@ demo: build
 ## demo-reset: reset demo account to first-run state (welcome screen + empty screener lists)
 demo-reset:
 	./scripts/reset-demo.sh $(HOME)/.config/neomd-demo
+
+## demo-hp: run neomd with Hostpoint demo account (fast)
+demo-hp: build
+	./$(BINARY) -config $(HOME)/.config/neomd-demo-hostpoint/config.toml
+
+## demo-hp-reset: reset Hostpoint demo to first-run state
+demo-hp-reset:
+	./scripts/reset-demo.sh $(HOME)/.config/neomd-demo-hostpoint
 
 ## benchmark: benchmark IMAP latency for Hostpoint and Gmail
 benchmark:

@@ -2071,6 +2071,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"o": m.cfg.Folders.ScreenedOut,
 			"w": m.cfg.Folders.Waiting,
 			"m": m.cfg.Folders.Someday,
+			"k": m.cfg.Folders.ToScreen,
 		}
 		if dst, ok := dstMap[key]; ok {
 			m.loading = true
