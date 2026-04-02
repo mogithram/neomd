@@ -21,16 +21,13 @@ else
     echo "  [ ] Welcome marker already absent"
 fi
 
-# 2. Clear demo screener lists
-cleared=0
-for list in screened_in.txt screened_out.txt feed.txt papertrail.txt spam.txt; do
-    path="$CONFIG_DIR/lists/$list"
-    if [ -f "$path" ] && [ -s "$path" ]; then
-        > "$path"
-        cleared=$((cleared + 1))
-    fi
-done
-echo "  [x] Cleared $cleared screener list(s)"
+# 2. Remove demo screener lists directory (recreated on next launch)
+if [ -d "$CONFIG_DIR/lists" ]; then
+    rm -rf "$CONFIG_DIR/lists"
+    echo "  [x] Removed lists directory"
+else
+    echo "  [ ] Lists directory already absent"
+fi
 
 # 3. Clear demo command history
 if [ -f "$DEMO_CACHE_DIR/cmd_history" ]; then
