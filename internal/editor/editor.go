@@ -108,7 +108,7 @@ func ReplyPrelude(to, cc, subject, from, originalFrom, originalBody string) stri
 	if from != "" {
 		s += fmt.Sprintf("# [neomd: from: %s]\n", from)
 	}
-	s += fmt.Sprintf("# [neomd: subject: Re: %s]\n\n---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
+	s += fmt.Sprintf("# [neomd: subject: %s]\n\n---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
 		subject, originalFrom, quoteLines(originalBody))
 	return s
 }

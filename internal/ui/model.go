@@ -2873,7 +2873,12 @@ func (m Model) launchReplyWithCC(extraCC string, replyAll bool) (tea.Model, tea.
 	}
 
 	subject := e.Subject
-	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+	low := strings.ToLower(subject)
+	hasReplyPrefix := strings.HasPrefix(low, "re:") ||
+		strings.HasPrefix(low, "aw:") ||
+		strings.HasPrefix(low, "sv:") ||
+		strings.HasPrefix(low, "vs:")
+	if !hasReplyPrefix {
 		subject = "Re: " + subject
 	}
 
@@ -2999,6 +3004,7 @@ func stripPrelude(body string) string {
 		if strings.HasPrefix(t, "# [neomd: to:") ||
 			strings.HasPrefix(t, "# [neomd: cc:") ||
 			strings.HasPrefix(t, "# [neomd: bcc:") ||
+			strings.HasPrefix(t, "# [neomd: from:") ||
 			strings.HasPrefix(t, "# [neomd: subject:") {
 			continue
 		}
