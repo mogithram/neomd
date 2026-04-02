@@ -1,6 +1,9 @@
 # Changelog
 
-## 2026-04-01
+# 2026-04-02
+- **Auto From on reply** — replying auto-selects the From address that matches the email's To/CC field (e.g. email sent to `simon@domain.com` replies from `simon@domain.com`); `r` now works from inbox list view; `# [neomd: from: ...]` shown in editor; `x` in pre-send discards the email
+
+# 2026-04-01
 - **Threaded inbox** — related emails are automatically grouped in the inbox list with a Twitter-style vertical connector line (`│`/`╰`); threads detected via `In-Reply-To`/`Message-ID` IMAP envelope headers with a reply-prefix subject fallback (only emails with `Re:`, `AW:`, `Fwd:` etc. are grouped by subject — recurring notifications/invoices stay separate); newest reply on top, root at bottom; threads sorted by most recent email so active conversations float to the top
 - **Clickable tabs** — folder tabs in the top bar are clickable with the mouse; click any tab to switch folders
 - **Spell check in pre-send (`s`)** — opens nvim with spell checking enabled (`en_us` + `de`), cursor jumps to the first misspelled word; use `]s`/`[s` to navigate errors, `z=` for suggestions, `zg` to add to dictionary; corrected body flows back to pre-send

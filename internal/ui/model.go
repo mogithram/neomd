@@ -328,8 +328,10 @@ type Model struct {
 	// Screener operations (I/O/F/P/$) are not undoable — they also modify .txt files.
 	undoStack [][]undoMove
 
-	// Forward: when true, bodyLoadedMsg launches forward editor instead of reader
-	pendingForward bool
+	// Forward/Reply: when true, bodyLoadedMsg launches the action instead of reader
+	pendingForward  bool
+	pendingReply    bool
+	pendingReplyAll bool
 
 	// Chord prefix: "g" or "M" while waiting for second key
 	pendingKey string
@@ -1110,6 +1112,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingForward = false
 			return m.launchForwardCmd()
 		}
+		if m.pendingReply {
+			m.pendingReply = false
+			return m.launchReplyCmd()
+		}
+		if m.pendingReplyAll {
+			m.pendingReplyAll = false
+			return m.launchReplyAllCmd()
+		}
 		m.openLinks = extractLinks(msg.body)
 		_ = loadEmailIntoReader(&m.reader, msg.email, msg.body, msg.attachments, m.openLinks, m.cfg.UI.Theme, m.width)
 		m.state = stateReading
@@ -1763,6 +1773,19 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if e == nil {
 			return m, nil
 		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
+
+	case "r":
+		e := selectedEmail(m.inbox)
+		if e == nil {
+			return m, nil
+		}
+		// Pre-select the correct From address before fetching body.
+		if idx := m.matchFromIndex(e.To, e.CC); idx >= 0 {
+			m.presendFromI = idx
+		}
+		m.pendingReply = true
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
 
@@ -2476,6 +2499,14 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateCompose
 		}
 		return m, nil
+	case "x":
+		// Discard the email entirely — clear everything and go back to inbox.
+		m.attachments = nil
+		m.pendingSend = nil
+		m.state = stateInbox
+		m.status = "Discarded."
+		m.isError = false
+		return m, nil
 	case "p":
 		return m.previewInBrowser()
 	case "esc":
@@ -2706,7 +2737,7 @@ func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	subject := e.Subject
-	prelude := editor.ForwardPrelude(subject, e.From, e.Date.Format("Mon, 02 Jan 2006 15:04:05 -0700"), e.To, m.openBody)
+	prelude := editor.ForwardPrelude(subject, m.presendFrom(), e.From, e.Date.Format("Mon, 02 Jan 2006 15:04:05 -0700"), e.To, m.openBody)
 
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
@@ -2789,7 +2820,7 @@ func (m Model) launchReplyWithCC(extraCC string, replyAll bool) (tea.Model, tea.
 		}
 	}
 
-	prelude := editor.ReplyPrelude(to, cc, subject, e.From, m.openBody)
+	prelude := editor.ReplyPrelude(to, cc, subject, m.presendFrom(), e.From, m.openBody)
 
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
 	if err != nil {
@@ -3001,7 +3032,7 @@ func (m Model) viewPresend() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(styleHelp.Render("  enter send · s spell · p preview · ctrl+f from · ctrl+b cc/bcc · a attach · D remove last · d draft · e edit · esc cancel"))
+	b.WriteString(styleHelp.Render("  enter send · s spell · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · e edit · d draft · esc cancel · x discard"))
 	return b.String()
 }
 

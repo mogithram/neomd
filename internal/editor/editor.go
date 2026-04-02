@@ -99,11 +99,14 @@ func Prelude(to, cc, subject, signature string) string {
 	return s
 }
 
-// ReplyPrelude builds a quote block for replies. cc may be empty.
-func ReplyPrelude(to, cc, subject, originalFrom, originalBody string) string {
+// ReplyPrelude builds a quote block for replies. cc and from may be empty.
+func ReplyPrelude(to, cc, subject, from, originalFrom, originalBody string) string {
 	s := fmt.Sprintf("# [neomd: to: %s]\n", to)
 	if cc != "" {
 		s += fmt.Sprintf("# [neomd: cc: %s]\n", cc)
+	}
+	if from != "" {
+		s += fmt.Sprintf("# [neomd: from: %s]\n", from)
 	}
 	s += fmt.Sprintf("# [neomd: subject: Re: %s]\n\n---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
 		subject, originalFrom, quoteLines(originalBody))
@@ -112,8 +115,11 @@ func ReplyPrelude(to, cc, subject, originalFrom, originalBody string) string {
 
 // ForwardPrelude builds a quoted forward block. The To field is left empty for
 // the user to fill in.
-func ForwardPrelude(subject, originalFrom, originalDate, originalTo, originalBody string) string {
+func ForwardPrelude(subject, from, originalFrom, originalDate, originalTo, originalBody string) string {
 	s := "# [neomd: to: ]\n"
+	if from != "" {
+		s += fmt.Sprintf("# [neomd: from: %s]\n", from)
+	}
 	if !strings.HasPrefix(strings.ToLower(subject), "fwd:") {
 		subject = "Fwd: " + subject
 	}
