@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -353,9 +354,19 @@ func expandPath(path string) string {
 }
 
 func TokenFilePath(accountName string) (string, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve config directory: %w", err)
+	var configDir string
+	if runtime.GOOS == "windows" {
+		var err error
+		configDir, err = os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve config directory: %w", err)
+		}
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		configDir = filepath.Join(home, ".config")
 	}
 	safe := strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || r == ':' {
