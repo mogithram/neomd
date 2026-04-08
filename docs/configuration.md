@@ -77,6 +77,17 @@ Connect: [LinkedIn](https://example.com/)"""
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.
 
+### Environment Variables
+
+The `password` and `user` fields support environment variable expansion. If the entire value is a single env var reference, neomd resolves it at startup:
+
+```toml
+password = "$IMAP_PASS"        # $VAR form
+password = "${IMAP_PASS}"      # ${VAR} form
+```
+
+Values containing other text or multiple `$` signs are left as-is, so passwords that happen to contain `$` are never mangled.
+
 Credentials are stored only in `~/.config/neomd/config.toml` (mode 0600) and never written elsewhere; all IMAP connections use TLS (port 993) or STARTTLS (port 143).
 
 ## Sending and Discarding
