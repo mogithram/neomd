@@ -108,8 +108,8 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `n` | toggle read/unread  (marked or cursor) |
 | `ctrl+n` | mark all in current folder as read |
 | `R` | reload / refresh folder |
-| `r` | reply  (from reader) |
-| `shift+R` | reply-all — reply to sender + all CC recipients  (from reader) |
+| `r` | reply  (from inbox or reader) |
+| `ctrl+r` | reply-all — reply to sender + all CC recipients  (from inbox or reader) |
 | `f` | forward email  (from reader or inbox) |
 | `c` | compose new email |
 | `ctrl+b  (compose/pre-send)` | toggle Cc+Bcc fields (both hidden by default) |

@@ -1966,6 +1966,18 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
 
+	case "ctrl+r":
+		e := selectedEmail(m.inbox)
+		if e == nil {
+			return m, nil
+		}
+		if idx := m.matchFromIndex(e.To, e.CC); idx >= 0 {
+			m.presendFromI = idx
+		}
+		m.pendingReplyAll = true
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
+
 	case "f":
 		e := selectedEmail(m.inbox)
 		if e == nil {
@@ -2268,6 +2280,9 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.launchReplyCmd()
 		}
 	case "R":
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
+	case "ctrl+r":
 		if m.openEmail != nil {
 			return m.launchReplyAllCmd()
 		}

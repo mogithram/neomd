@@ -277,7 +277,11 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 					}
 				}
 				if len(m.Envelope.To) > 0 {
-					e.To = m.Envelope.To[0].Addr()
+					to := make([]string, 0, len(m.Envelope.To))
+					for _, a := range m.Envelope.To {
+						to = append(to, a.Addr())
+					}
+					e.To = strings.Join(to, ", ")
 				}
 				if len(m.Envelope.Cc) > 0 {
 					cc := make([]string, 0, len(m.Envelope.Cc))
@@ -577,6 +581,20 @@ func (c *Client) FetchHeadersByUID(ctx context.Context, folder string, uids []ui
 					} else {
 						e.From = a.Addr()
 					}
+				}
+				if len(m.Envelope.To) > 0 {
+					to := make([]string, 0, len(m.Envelope.To))
+					for _, a := range m.Envelope.To {
+						to = append(to, a.Addr())
+					}
+					e.To = strings.Join(to, ", ")
+				}
+				if len(m.Envelope.Cc) > 0 {
+					cc := make([]string, 0, len(m.Envelope.Cc))
+					for _, a := range m.Envelope.Cc {
+						cc = append(cc, a.Addr())
+					}
+					e.CC = strings.Join(cc, ", ")
 				}
 			}
 			emails = append(emails, e)

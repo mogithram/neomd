@@ -561,14 +561,107 @@ func TestIntegration_MultipleRecipients(t *testing.T) {
 	email := waitForEmail(t, cli, "INBOX", subject, 30*time.Second)
 	defer cleanupEmail(t, cli, "INBOX", email.UID)
 
-	// Fetch body and verify To header contains both addresses
-	markdown, _, _, _, err := cli.FetchBody(context.Background(), "INBOX", email.UID)
-	if err != nil {
-		t.Fatalf("FetchBody: %v", err)
+	// Verify To field contains both addresses (not just the first)
+	if !strings.Contains(email.To, env.user) {
+		t.Errorf("To field missing primary address, got: %q", email.To)
 	}
-	_ = markdown
+	if !strings.Contains(email.To, user2) {
+		t.Errorf("To field missing second address %q, got: %q", user2, email.To)
+	}
 
-	t.Logf("Email delivered with To: %s, CC: %s", to, cc)
+	// Verify CC is populated
+	if email.CC == "" {
+		t.Logf("Note: CC not populated in envelope (fetch path may not include it)")
+	} else if !strings.Contains(email.CC, env.user) {
+		t.Errorf("CC field missing %q, got: %q", env.user, email.CC)
+	}
+
+	t.Logf("Email delivered with To: %s, CC: %s", email.To, email.CC)
+}
+
+func TestIntegration_ReplyAllPreservesRecipients(t *testing.T) {
+	env := loadEnv(t)
+	cli := env.imapClient()
+	defer cli.Close()
+
+	// Three distinct addresses to properly test reply-all.
+	// demo sends to simu + simon, then reply-all should CC both back.
+	user2 := getEnvOr("NEOMD_TEST_USER2", "simu@sspaeti.com")
+	user3 := getEnvOr("NEOMD_TEST_USER3", "simon@ssp.sh")
+
+	// Step 1: Send a group email from demo to user2, CC user3
+	origSubject := uniqueSubject("reply-all-orig")
+	origBody := "Original group email for reply-all test."
+
+	err := smtp.Send(env.smtpConfig(), user2, user3, "", origSubject, origBody, nil)
+	if err != nil {
+		t.Fatalf("Send original: %v", err)
+	}
+
+	// The email lands in demo's Sent (via SaveSent) but also in demo's INBOX
+	// if demo is in CC. Since demo is not in To/CC here, we save to Sent to
+	// have a copy to inspect.
+	raw, err := smtp.BuildMessage(env.from, user2, user3, origSubject, origBody, nil)
+	if err != nil {
+		t.Fatalf("BuildMessage: %v", err)
+	}
+	err = cli.SaveSent(context.Background(), "Sent", raw)
+	if err != nil {
+		t.Fatalf("SaveSent: %v", err)
+	}
+
+	original := waitForEmail(t, cli, "Sent", origSubject, 15*time.Second)
+	defer cleanupEmail(t, cli, "Sent", original.UID)
+
+	// Step 2: Simulate reply-all from user2's perspective.
+	// Reply-all logic: To = original sender, CC = all To + CC minus self.
+	replySubject := "Re: " + origSubject
+	replyBody := "Reply-all response.\n\n> " + origBody
+
+	// To = original sender (demo)
+	replyTo := env.user
+
+	// CC = original To + CC, minus the replier (user2)
+	allRecipients := original.To
+	if original.CC != "" {
+		allRecipients += ", " + original.CC
+	}
+	var replyCC []string
+	user2Lower := strings.ToLower(user2)
+	for _, addr := range strings.Split(allRecipients, ",") {
+		a := strings.TrimSpace(addr)
+		if a != "" && strings.ToLower(a) != user2Lower {
+			replyCC = append(replyCC, a)
+		}
+	}
+	replyCCStr := strings.Join(replyCC, ", ")
+
+	t.Logf("Reply-all: To=%s CC=%s", replyTo, replyCCStr)
+
+	err = smtp.Send(env.smtpConfig(), replyTo, replyCCStr, "", replySubject, replyBody, nil)
+	if err != nil {
+		t.Fatalf("Send reply-all: %v", err)
+	}
+
+	// Step 3: Verify the reply arrives at demo (the To recipient)
+	reply := waitForEmail(t, cli, "INBOX", replySubject, 30*time.Second)
+	defer cleanupEmail(t, cli, "INBOX", reply.UID)
+
+	if !strings.Contains(reply.Subject, "Re:") {
+		t.Errorf("Reply subject missing Re: prefix, got: %q", reply.Subject)
+	}
+
+	// To should be the demo account (original sender)
+	if !strings.Contains(reply.To, env.user) {
+		t.Errorf("Reply To missing demo address, got: %q", reply.To)
+	}
+
+	// CC should contain user3 (simon@ssp.sh)
+	if !strings.Contains(reply.CC, user3) {
+		t.Errorf("Reply CC missing %q, got: %q", user3, reply.CC)
+	}
+
+	t.Logf("Reply-all delivered: To=%s CC=%s", reply.To, reply.CC)
 }
 
 // --- Helpers ---
