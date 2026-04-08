@@ -82,10 +82,14 @@ func Send(cfg Config, to, cc, bcc, subject, markdownBody string, attachments []s
 		return fmt.Errorf("build message: %w", err)
 	}
 
-	toAddrs := []string{extractAddr(to)}
-	for _, addr := range strings.Split(cc+","+bcc, ",") {
-		if a := extractAddr(strings.TrimSpace(addr)); a != "" && a != extractAddr(to) {
-			toAddrs = append(toAddrs, a)
+	seen := make(map[string]bool)
+	var toAddrs []string
+	for _, field := range []string{to, cc, bcc} {
+		for _, addr := range strings.Split(field, ",") {
+			if a := extractAddr(strings.TrimSpace(addr)); a != "" && !seen[a] {
+				seen[a] = true
+				toAddrs = append(toAddrs, a)
+			}
 		}
 	}
 	fromAddr := extractAddr(cfg.From)
