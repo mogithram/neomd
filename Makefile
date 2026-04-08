@@ -4,7 +4,7 @@ INSTALL := $(HOME)/.local/bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build run install clean test send-test vet fmt tidy release docs help check-go demo demo-reset demo-hp demo-hp-reset benchmark
+.PHONY: build run install clean test test-integration send-test vet fmt tidy release docs help check-go demo demo-reset demo-hp demo-hp-reset benchmark
 
 ## check-go: verify Go is installed
 check-go:
@@ -61,9 +61,18 @@ benchmark:
 	@echo "=== Gmail ==="
 	@IMAP_HOST=imap.gmail.com IMAP_USER=neomd.demo@gmail.com IMAP_PASS=$$IMAP_APPPASS_GMAIL_NEOMD ./scripts/imap-benchmark.sh
 
-## test: run all tests
+## test: run all unit tests (fast, no network)
 test:
 	go test ./...
+
+## test-integration: run integration tests against real IMAP/SMTP (sends emails to demo account)
+test-integration:
+	NEOMD_TEST_IMAP_HOST=imap.mail.hostpoint.ch \
+	NEOMD_TEST_SMTP_HOST=asmtp.mail.hostpoint.ch \
+	NEOMD_TEST_USER=neomd.demo@ssp.sh \
+	NEOMD_TEST_PASS=$$IMAP_PASS_NEOMD_DEMO \
+	NEOMD_TEST_FROM="Neomd Demo <neomd.demo@ssp.sh>" \
+	go test ./internal/ -run TestIntegration -v -count=1 -timeout 120s
 
 ## send-test: send a test email to sspaeti@hey.com (override: make send-test TO=other@example.com)
 send-test:
