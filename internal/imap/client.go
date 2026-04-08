@@ -40,6 +40,7 @@ type Email struct {
 	Subject       string
 	Date          time.Time
 	Seen          bool
+	Answered      bool   // \Answered flag — set when replied to from any client
 	Folder        string
 	Size          uint32 // RFC822 size in bytes
 	HasAttachment bool   // true if BODYSTRUCTURE contains an attachment part
@@ -263,6 +264,9 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 			for _, f := range m.Flags {
 				if f == imap.FlagSeen {
 					e.Seen = true
+				}
+				if f == imap.FlagAnswered {
+					e.Answered = true
 				}
 			}
 			if m.Envelope != nil {
@@ -570,6 +574,9 @@ func (c *Client) FetchHeadersByUID(ctx context.Context, folder string, uids []ui
 				if f == imap.FlagSeen {
 					e.Seen = true
 				}
+				if f == imap.FlagAnswered {
+					e.Answered = true
+				}
 			}
 			if m.Envelope != nil {
 				e.Subject = m.Envelope.Subject
@@ -784,6 +791,24 @@ func (c *Client) MarkUnseen(ctx context.Context, folder string, uid uint32) erro
 		return conn.Store(uidSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsDel,
 			Flags: []imap.Flag{imap.FlagSeen},
+		}, nil).Close()
+	})
+}
+
+// MarkAnswered adds the \Answered flag to a message (set after replying).
+func (c *Client) MarkAnswered(ctx context.Context, folder string, uid uint32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.withConn(ctx, func(conn *imapclient.Client) error {
+		if err := c.selectMailbox(folder); err != nil {
+			return err
+		}
+		var uidSet imap.UIDSet
+		uidSet.AddNum(imap.UID(uid))
+		return conn.Store(uidSet, &imap.StoreFlags{
+			Op:    imap.StoreFlagsAdd,
+			Flags: []imap.Flag{imap.FlagAnswered},
 		}, nil).Close()
 	})
 }

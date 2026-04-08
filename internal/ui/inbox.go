@@ -85,7 +85,7 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	}
 	sizeStr := fmtSize(e.email.Size)
 
-	fixed := colNumWidth + colFlagWidth + colThreadWidth + colDateWidth + colAttachWidth + colSizeWidth + 2 // 2 spaces padding
+	fixed := colNumWidth + colFlagWidth + colReplyWidth + colThreadWidth + colDateWidth + colAttachWidth + colSizeWidth + 2 // 2 spaces padding
 	fromMax := 20
 	subjectMax := width - fixed - fromMax - 2
 	if subjectMax < 8 {
@@ -102,8 +102,8 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	subject := truncate(e.email.Subject, subjectMax)
 
 	if isSelected {
-		row := fmt.Sprintf("%s%s%s%s%s%-*s  %-*s  %s",
-			num, flag, threadStr, dateStr, attachStr,
+		row := fmt.Sprintf("%s%s%s%s%s%s%-*s  %-*s  %s",
+			num, flag, replyStr, threadStr, dateStr, attachStr,
 			fromMax, from,
 			subjectMax, subject,
 			sizeStr,
@@ -123,6 +123,10 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	default:
 		flagS = lipgloss.NewStyle().Foreground(colorMuted).Render(flag)
 	}
+	replyS := lipgloss.NewStyle().Foreground(colorMuted).Render(replyStr)
+	if e.email.Answered {
+		replyS = lipgloss.NewStyle().Foreground(colorPrimary).Render(replyStr)
+	}
 	threadS := lipgloss.NewStyle().Foreground(colorBorder).Render(threadStr)
 	dateS := lipgloss.NewStyle().Foreground(colorDateCol).Render(dateStr)
 	attachS := lipgloss.NewStyle().Foreground(colorDateCol).Render(attachStr)
@@ -137,7 +141,7 @@ func (d emailDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	subS := subStyle.Render(fmt.Sprintf("%-*s", subjectMax, subject))
 	sizeS := lipgloss.NewStyle().Foreground(colorSizeCol).Render(sizeStr)
 
-	fmt.Fprint(w, numS+flagS+threadS+dateS+attachS+fromS+"  "+subS+"  "+sizeS)
+	fmt.Fprint(w, numS+flagS+replyS+threadS+dateS+attachS+fromS+"  "+subS+"  "+sizeS)
 }
 
 // cleanFrom strips the <addr> part when a display name is present.

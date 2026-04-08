@@ -51,8 +51,10 @@ type (
 		attachments []imap.Attachment
 	}
 	sendDoneMsg struct {
-		err     error
-		warning string
+		err           error
+		warning       string
+		replyToUID    uint32 // set \Answered on this email after send
+		replyToFolder string
 	}
 	screenDoneMsg     struct{ err error }
 	autoScreenDoneMsg struct {
@@ -369,6 +371,10 @@ func (m Model) writeDebugReport() tea.Cmd {
 // pendingSendData holds a composed message waiting in the pre-send review screen.
 type pendingSendData struct {
 	to, cc, bcc, subject, body string
+	// replyToUID/replyToFolder track the original email when this is a reply,
+	// so we can set \Answered after sending. Zero means not a reply.
+	replyToUID    uint32
+	replyToFolder string
 }
 
 // undoMove records one IMAP move so it can be reversed with u.
@@ -656,7 +662,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string) tea.Cmd {
+func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder string) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -681,9 +687,13 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 		}
 		// Save copy to Sent; non-fatal if it fails, but warn user.
 		if saveErr := cli.SaveSent(nil, sentFolder, raw); saveErr != nil {
-			return sendDoneMsg{warning: "Sent, but failed to save to Sent folder: " + saveErr.Error()}
+			return sendDoneMsg{warning: "Sent, but failed to save to Sent folder: " + saveErr.Error(), replyToUID: replyToUID, replyToFolder: replyToFolder}
 		}
-		return sendDoneMsg{}
+		// Mark original email as \Answered (non-fatal).
+		if replyToUID > 0 && replyToFolder != "" {
+			_ = cli.MarkAnswered(nil, replyToFolder, replyToUID)
+		}
+		return sendDoneMsg{replyToUID: replyToUID, replyToFolder: replyToFolder}
 	}
 }
 
@@ -1295,6 +1305,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isError = false
 			m.state = stateInbox
 		}
+		// Update local Answered flag so the reply indicator shows immediately.
+		if msg.replyToUID > 0 {
+			items := m.list.Items()
+			for i, it := range items {
+				if ei, ok := it.(emailItem); ok && ei.email.UID == msg.replyToUID {
+					ei.email.Answered = true
+					items[i] = ei
+					break
+				}
+			}
+			m.list.SetItems(items)
+		}
 		return m, nil
 
 	case attachOpenDoneMsg:
@@ -1554,6 +1576,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingSend = &pendingSendData{
 			to: msg.to, cc: msg.cc, bcc: mergeAutoBCC(msg.bcc, m.cfg.AutoBCC),
 			subject: msg.subject, body: cleanBody,
+		}
+		// Track original email for \Answered flag (replies/forwards).
+		if m.openEmail != nil && strings.HasPrefix(strings.ToLower(msg.subject), "re:") {
+			m.pendingSend.replyToUID = m.openEmail.UID
+			m.pendingSend.replyToFolder = m.openEmail.Folder
 		}
 		m.state = statePresend
 		return m, nil
@@ -2656,9 +2683,10 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		from := m.presendFrom()
 		smtpAcct := m.presendSMTPAccount()
 		attachments := m.attachments
+		replyUID, replyFolder := ps.replyToUID, ps.replyToFolder
 		m.attachments = nil
 		m.pendingSend = nil
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments))
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder))
 	case "ctrl+f":
 		froms := m.presendFroms()
 		if len(froms) > 1 {
