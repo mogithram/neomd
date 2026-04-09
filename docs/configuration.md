@@ -76,7 +76,9 @@ Connect: [LinkedIn](https://example.com/)
 *sent from [neomd](https://neomd.ssp.sh)*"""
 ```
 
-> **Gmail users:** Gmail uses different IMAP folder names (`[Gmail]/Sent Mail`, `[Gmail]/Trash`, etc.). See [Gmail Configuration](gmail.md) for the correct mapping.
+
+> [!NOTE]
+> **Gmail** uses different IMAP folder names (`[Gmail]/Sent Mail`, `[Gmail]/Trash`, etc.). See [Gmail Configuration](gmail.md) for the correct mapping.
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.
 

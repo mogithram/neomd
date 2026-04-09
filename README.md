@@ -4,7 +4,9 @@ A minimal terminal email client for people who write in Markdown and live in Neo
 
 [Neomd](https://www.ssp.sh/brain/neomd/) is my way of implementing an email TUI based on my experience with Neomutt, focusing on [Neovim](https://www.ssp.sh/brain/neovim) (input) and reading/writing in [Markdown](https://www.ssp.sh/brain/markdown) and navigating with [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions) with the GTD workflow and [HEY-Screener](https://www.hey.com/features/the-screener/).
 
-> ⚠️ **Warning:** neomd moves, deletes, and modifies emails directly on your IMAP server. These operations affect your mailbox across all devices. **Back up important emails before first use.** neomd is experimental software and can't take responsibility for lost or misplaced emails. Consider testing with a secondary email account first.
+
+> [!WARNING]
+> neomd moves, deletes, and modifies emails directly on your IMAP server. These operations affect your mailbox across all devices. **Back up important emails before first use.** neomd is experimental software and can't take responsibility for lost or misplaced emails. Consider testing with a secondary email account first.
 
 ## The philosophy behind Neomd: What's unique?
 
@@ -16,7 +18,9 @@ With the [GTD approach](https://www.ssp.sh/brain/getting-things-done-gtd), using
 
 With the additional **Feed** and **Papertrail**, two additional features from HEY, you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
 
->**Note on Speed**: neomd's speed depends entirely on your IMAP provider. On Hostpoint (the provider I use), a folder switch takes **~33ms** which feels instant. On Gmail, the same operation takes **~570ms** which is noticeably slow. See [Benchmark](#benchmark) for full details and how to test your provider.
+
+> [!NOTE]
+> neomd's **speed** depends entirely on your IMAP provider. On Hostpoint (the provider I use), a folder switch takes **~33ms** which feels instant. On Gmail, the same operation takes **~570ms** which is noticeably slow. See [Benchmark](#benchmark) for full details and how to test your provider.
 
 ## Screenshots
 
@@ -167,7 +171,9 @@ On first launch, **auto-screening is paused** because your screener lists are em
 
 You choose who can land in your Inbox. Bye-bye spam. This is the beauty of [HEY-Screener](https://www.hey.com/features/the-screener/), and neomd implements the same concept.
 
-> **Tip:** To disable auto-screening entirely, set `auto_screen_on_load = false` in `[ui]` config. Run `:debug` inside neomd if something isn't working.
+> [!TIP]
+> To disable auto-screening entirely, set `auto_screen_on_load = false` in `[ui]` config. Run `:debug` inside neomd if something isn't working.
+
 ### Screener Workflow
 
 Find full Screener Workflow at [docs/screener.md](docs/screener.md), classification tables, and bulk re-classification instructions.
@@ -243,6 +249,8 @@ neomd's responsiveness depends entirely on your IMAP server. Every folder switch
 
 Interestingly, Gmail benchmarks fast on a **fresh single connection** (`scripts/imap-benchmark.sh` shows ~70ms total, same as Hostpoint). But on a **sustained session** with sequential commands — which is how neomd actually uses IMAP — Gmail adds ~180ms latency per command. This is likely Gmail's internal label-to-folder translation and session management overhead. The result: every action in neomd feels much slower on Gmail, while Hostpoint stays instant.
 
+
+> [!NOTE]
 > **Gmail is not recommended.** If you're on Gmail, consider a dedicated email provider (Hostpoint, Fastmail, HEY, Migadu, etc.) for the best neomd experience. Or use Gmail just for fun :). See [docs/gmail.md](docs/gmail.md) for Gmail-specific folder configuration.
 
 **Test your own provider:**

@@ -38,6 +38,8 @@ Attachments are tightly integrated with both the pre-send screen and neovim.
 
 **From within neovim** — press `<leader>a` in any `neomd-*.md` buffer to open yazi in a floating terminal. Selected files are inserted at the cursor as visible `[attach] /path/to/file` lines.
 
+
+> [!NOTE]
 > **Requires** [custom.lua](https://github.com/sspaeti/dotfiles/blob/master/nvim/.config/nvim/lua/sspaeti/custom.lua) added to your neovim config, and [yazi](https://github.com/sxyazi/yazi) installed.
 
 neomd strips `[attach]` lines before sending:
