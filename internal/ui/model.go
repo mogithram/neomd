@@ -728,7 +728,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder, replyToAccount string) tea.Cmd {
+func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, includeHTMLSig bool, replyToUID uint32, replyToFolder, replyToAccount string) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -743,10 +743,14 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 	cli := m.sentDraftsIMAPClient()
 	sentFolder := m.cfg.Folders.Sent
 	replyCli := m.imapCliForAccount(replyToAccount)
+	htmlSignature := ""
+	if includeHTMLSig {
+		htmlSignature = m.cfg.UI.HTMLSignature()
+	}
 	return func() tea.Msg {
 		// Build raw MIME once — reused for both SMTP delivery and Sent copy.
 		// BCC is intentionally excluded from headers but included in RCPT TO.
-		raw, err := smtp.BuildMessage(from, to, cc, subject, body, attachments)
+		raw, err := smtp.BuildMessage(from, to, cc, subject, body, attachments, htmlSignature)
 		if err != nil {
 			return sendDoneMsg{err: fmt.Errorf("build message: %w", err)}
 		}
@@ -1818,6 +1822,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Strip editor header hints and extract [attach] lines.
+		// [html-signature] marker is NOT extracted yet — keep it in body for preview.
 		inlineAttach, cleanBody := extractInlineAttachments(stripPrelude(msg.body))
 		m.attachments = append(m.attachments, inlineAttach...)
 		m.applyEditedFrom(msg.from)
@@ -3113,9 +3118,11 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		smtpAcct := m.presendSMTPAccount()
 		attachments := m.attachments
 		replyUID, replyFolder := ps.replyToUID, ps.replyToFolder
+		// Extract [html-signature] marker from body now (right before sending)
+		includeHTMLSig, cleanBody := extractHTMLSignatureMarker(ps.body)
 		m.attachments = nil
 		m.pendingSend = nil
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder, ps.replyToAccount))
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, cleanBody, attachments, includeHTMLSig, replyUID, replyFolder, ps.replyToAccount))
 	case "ctrl+f":
 		froms := m.presendFroms()
 		if len(froms) <= 1 {
@@ -3296,7 +3303,7 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 	cc := m.compose.cc.Value()
 	bcc := m.compose.bcc.Value()
 	subject := m.compose.subject.Value()
-	prelude := editor.Prelude(to, cc, bcc, m.presendFrom(), subject, m.cfg.UI.Signature)
+	prelude := editor.Prelude(to, cc, bcc, m.presendFrom(), subject, m.cfg.UI.TextSignature())
 
 	// Write temp file
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
@@ -3735,6 +3742,23 @@ func extractInlineAttachments(body string) (files []string, clean string) {
 		kept = append(kept, line)
 	}
 	return files, strings.Join(kept, "\n")
+}
+
+// extractHTMLSignatureMarker scans body for [html-signature] marker.
+// If found, removes it and returns (true, cleanBody).
+// If not found, returns (false, body unchanged).
+func extractHTMLSignatureMarker(body string) (includeHTMLSig bool, clean string) {
+	const marker = "[html-signature]"
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == marker {
+			includeHTMLSig = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return includeHTMLSig, strings.Join(kept, "\n")
 }
 
 // ── View ──────────────────────────────────────────────────────────────────

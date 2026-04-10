@@ -498,6 +498,99 @@ func TestBuildDraftMessage_WithAttachment(t *testing.T) {
 	}
 }
 
+func TestBuildMessage_WithHTMLSignature(t *testing.T) {
+	// Test that HTML signature is appended to text/html part only
+	markdownBody := "Hello world!"
+	htmlSig := `<table style="font-size:12px"><tr><td>John Doe</td></tr></table>`
+
+	raw, err := BuildMessage(
+		"Alice <alice@example.com>",
+		"Bob <bob@example.com>",
+		"",
+		"Test HTML Signature",
+		markdownBody,
+		nil,
+		htmlSig,
+	)
+	if err != nil {
+		t.Fatalf("BuildMessage: %v", err)
+	}
+
+	_, mediaType, params := parseMIME(t, raw)
+	if mediaType != "multipart/alternative" {
+		t.Fatalf("expected multipart/alternative, got %s", mediaType)
+	}
+
+	msg, _ := mail.ReadMessage(bytes.NewReader(raw))
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+
+	// Read text/plain part
+	part0, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("NextPart 0: %v", err)
+	}
+	ct0, _, _ := mime.ParseMediaType(part0.Header.Get("Content-Type"))
+	if ct0 != "text/plain" {
+		t.Errorf("part 0: expected text/plain, got %s", ct0)
+	}
+	plainBody, _ := io.ReadAll(part0)
+	plainStr := string(plainBody)
+	if strings.Contains(plainStr, "table") || strings.Contains(plainStr, "<tr>") {
+		t.Error("text/plain part contains HTML signature (should be plain text only)")
+	}
+	// QP encoding preserves "Hello world" as-is (all ASCII)
+	if !strings.Contains(plainStr, "Hello world") {
+		t.Errorf("text/plain part missing body content, got:\n%s", plainStr)
+	}
+
+	// Read text/html part
+	part1, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("NextPart 1: %v", err)
+	}
+	ct1, _, _ := mime.ParseMediaType(part1.Header.Get("Content-Type"))
+	if ct1 != "text/html" {
+		t.Errorf("part 1: expected text/html, got %s", ct1)
+	}
+	htmlBody, _ := io.ReadAll(part1)
+	htmlStr := string(htmlBody)
+	// Check for key parts (QP may have soft line breaks, but these strings should appear)
+	if !strings.Contains(htmlStr, "Hello world") {
+		t.Errorf("text/html part missing body content, got:\n%s", htmlStr)
+	}
+	if !strings.Contains(htmlStr, "table") || !strings.Contains(htmlStr, "John Doe") {
+		t.Errorf("text/html part missing HTML signature, got:\n%s", htmlStr)
+	}
+}
+
+func TestBuildMessage_WithoutHTMLSignature(t *testing.T) {
+	// Passing empty htmlSignature should work fine (backward compatibility)
+	raw, err := BuildMessage(
+		"Alice <alice@example.com>",
+		"Bob <bob@example.com>",
+		"",
+		"No HTML Signature",
+		"plain body",
+		nil,
+		"", // empty HTML signature
+	)
+	if err != nil {
+		t.Fatalf("BuildMessage: %v", err)
+	}
+
+	// Should still produce multipart/alternative with both parts
+	msg, mediaType, params := parseMIME(t, raw)
+	if mediaType != "multipart/alternative" {
+		t.Errorf("expected multipart/alternative, got %s", mediaType)
+	}
+
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	parts := readParts(t, mr)
+	if len(parts) != 2 {
+		t.Errorf("expected 2 parts, got %d", len(parts))
+	}
+}
+
 func TestInferSMTPUseTLS(t *testing.T) {
 	tests := []struct {
 		name         string

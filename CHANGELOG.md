@@ -1,6 +1,11 @@
 # Changelog
 
 # 2026-04-10
+
+
+# 2026-04-10
+- **HTML signature support** — new `[ui.signature_block]` config with separate `text` and `html` fields for dual-format signatures; text signature appears in the editor and text/plain MIME part, HTML signature appends to the text/html part only; use `[html-signature]` placeholder in text signature to control HTML signature inclusion per-email (visible in preview, deletable before sending); backward compatible with legacy `signature` field
+- **Fix: draft formatting corruption** — drafts are now stored as plain text only instead of multipart/alternative to prevent HTML→markdown conversion artifacts; fixes line break addition, pipe escaping (`|` → `\|`), and italic style changes (`*` → `_`) when reopening saved drafts
 - **Sent/Drafts primary-account default restored** — in multi-account setups, Sent and Drafts now default back to the first configured IMAP account while SMTP still uses the selected sending identity; added `store_sent_drafts_in_sending_account = true` for users who want Sent/Drafts to follow the sending account instead
 - **Proton Mail Bridge compatibility** — documented that Proton Mail works with neomd only via Proton Mail Bridge (paid Proton feature), added optional `tls_cert_file` support for trusting Bridge’s exported self-signed certificate, and added a narrow localhost-only TLS retry fallback for Bridge connections on `127.0.0.1`/`localhost`; normal remote IMAP/SMTP providers keep their existing strict certificate verification behavior
 - **Issue #6 verification pass** — reviewed the user report against the current code and  specifically verified that startup auto-screening does not route Inbox mail to Trash in the current implementation, while manual `ToScreen` screening remains message-by-message by design

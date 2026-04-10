@@ -78,4 +78,53 @@ Press `p` to see exactly what the recipient will see — the email is rendered t
 
 Press `d` in the pre-send screen to save to Drafts instead of sending. Navigate to Drafts with `gd`. To resume a saved draft, open it and press `E` — it re-opens in the editor with all fields pre-filled, and saving goes through the normal pre-send review.
 
+**Note:** Drafts are stored as plain text only (not multipart/alternative) to preserve markdown formatting when reopening. This prevents formatting corruption like line break addition, pipe escaping, and italic style changes.
+
+## HTML Signatures
+
+neomd supports dual-format signatures for professional email layouts with logos, tables, and styled text.
+
+Configure separate text and HTML signatures in `[ui.signature_block]`:
+
+```toml
+[ui.signature_block]
+  text = """[html-signature]"""
+
+  html = """<table style="font-size: 14px; color: #333;">
+  <tr>
+    <td><img src="https://example.com/logo.png" width="80"></td>
+    <td>
+      <strong>Your Name</strong><br>
+      Your Title, Company Name
+    </td>
+  </tr>
+</table>"""
+```
+
+**How it works:**
+
+- The **text signature** appears in the editor and in the `text/plain` MIME part
+- The **HTML signature** is appended to the `text/html` MIME part only
+- Recipients using HTML email clients see the styled HTML signature
+- Recipients using plain text clients see the text signature
+
+**The `[html-signature]` placeholder:**
+
+Include `[html-signature]` in your text signature (as shown above) to control HTML signature inclusion on a per-email basis:
+
+- The placeholder is **visible** in the editor and pre-send preview
+- When you send, neomd strips the placeholder and appends the HTML signature to the HTML part
+- **Delete the placeholder** in the editor to send without the HTML signature for that specific email
+
+This gives you full control: professional HTML signatures by default, plain signatures when needed.
+
+**Best practices:**
+
+- Use inline styles only (no `<style>` blocks) for maximum email client compatibility
+- Host images externally (`https://example.com/logo.png`) so they display for recipients
+- Test your HTML signature by sending to yourself first
+- The `--` separator is added automatically before the text signature
+
+For full HTML signature configuration examples, see [configuration.md](configuration.md#html-signatures).
+
 For reading emails — images, links, attachments, and navigation — see [reading.md](reading.md).

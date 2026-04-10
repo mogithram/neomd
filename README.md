@@ -81,6 +81,7 @@ Or in Gmail:
 - **Link opener** — links in emails are numbered `[1]`-`[0]` in the reader header; press `space+digit` to open in `$BROWSER`
 - **CC, BCC, Reply-all** — optional Cc/Bcc fields (toggle with `ctrl+b`); `R` in the reader replies to sender + all CC recipients
 - **Drafts** — `d` in pre-send saves to Drafts (IMAP APPEND); `E` in the reader re-opens a draft as an editable compose; compose sessions are auto-backed up to `~/.cache/neomd/drafts/` so you never lose an unsent email (`:recover` to reopen)
+- **HTML signatures** — configure separate text and HTML signatures; text signature appears in editor and plain text part, HTML signature in HTML part only; use `[html-signature]` placeholder to control inclusion per-email
 - **Multiple From addresses** — define SMTP-only `[[senders]]` aliases (e.g. `s@ssp.sh` through an existing account); cycle with `ctrl+f` in compose and pre-send; sent copies always land in the Sent folder
 - **Undo** — `u` reverses the last move or delete (`x`, `A`, `M*`) using the UIDPLUS destination UID
 - **Search** — `/` filters loaded emails in-memory; `space /` or `:search` runs IMAP SEARCH across all folders (only fetching header capped at 100 per folder) with results in a temporary "Search" tab; supports `from:`, `subject:`, `to:` prefixes

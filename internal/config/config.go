@@ -118,15 +118,36 @@ func (f FoldersConfig) TabLabels() []string {
 	return tabs
 }
 
+// SignatureConfig holds plain text and HTML signature blocks.
+type SignatureConfig struct {
+	Text string `toml:"text"` // markdown/plain text signature for text/plain part and editor
+	HTML string `toml:"html"` // optional HTML signature injected into text/html part
+}
+
 // UIConfig holds display preferences.
 type UIConfig struct {
-	Theme                 string `toml:"theme"`                   // dark | light | auto
-	InboxCount            int    `toml:"inbox_count"`             // number of messages to fetch
-	Signature             string `toml:"signature"`               // appended to new compose buffers (markdown)
-	AutoScreenOnLoad      *bool  `toml:"auto_screen_on_load"`     // screen inbox on every load (default true)
-	BgSyncInterval        int    `toml:"bg_sync_interval"`        // background sync interval in minutes (0 = disabled, default 5)
-	BulkProgressThreshold int    `toml:"bulk_progress_threshold"` // show progress counter for batches larger than this (default 10)
-	DraftBackupCount      int    `toml:"draft_backup_count"`      // rolling compose backups in ~/.cache/neomd/drafts/ (default 20, -1 = disabled)
+	Theme                 string           `toml:"theme"`                   // dark | light | auto
+	InboxCount            int              `toml:"inbox_count"`             // number of messages to fetch
+	Signature             string           `toml:"signature"`               // legacy: plain signature (markdown). Deprecated in favor of [ui.signature] block.
+	SignatureBlock        SignatureConfig  `toml:"signature_block"`         // new structured signature config
+	AutoScreenOnLoad      *bool            `toml:"auto_screen_on_load"`     // screen inbox on every load (default true)
+	BgSyncInterval        int              `toml:"bg_sync_interval"`        // background sync interval in minutes (0 = disabled, default 5)
+	BulkProgressThreshold int              `toml:"bulk_progress_threshold"` // show progress counter for batches larger than this (default 10)
+	DraftBackupCount      int              `toml:"draft_backup_count"`      // rolling compose backups in ~/.cache/neomd/drafts/ (default 20, -1 = disabled)
+}
+
+// TextSignature returns the text/markdown signature for editor and text/plain part.
+// Prefers signature_block.text, falls back to legacy signature field.
+func (u UIConfig) TextSignature() string {
+	if u.SignatureBlock.Text != "" {
+		return u.SignatureBlock.Text
+	}
+	return u.Signature
+}
+
+// HTMLSignature returns the HTML signature for text/html part, or empty if not configured.
+func (u UIConfig) HTMLSignature() string {
+	return u.SignatureBlock.HTML
 }
 
 // DraftBackups returns the max number of rolling draft backups (default 20, -1 = disabled).

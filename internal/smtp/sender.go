@@ -247,10 +247,15 @@ func sendSTARTTLSWithConfig(addr, host string, tlsCfg *tls.Config, auth smtp.Aut
 // BCC must not be passed — it must never appear in message headers.
 // When attachments is non-empty the message is wrapped in multipart/mixed;
 // otherwise the structure is unchanged (multipart/alternative only).
-func BuildMessage(from, to, cc, subject, markdownBody string, attachments []string) ([]byte, error) {
+// htmlSignature, if non-empty, is appended to the text/html part after markdown conversion.
+func BuildMessage(from, to, cc, subject, markdownBody string, attachments []string, htmlSignature string) ([]byte, error) {
 	htmlBody, err := render.ToHTML(markdownBody)
 	if err != nil {
 		return nil, fmt.Errorf("markdown to html: %w", err)
+	}
+	// Append HTML signature to the HTML part if provided
+	if htmlSignature != "" {
+		htmlBody = htmlBody + "\n" + htmlSignature
 	}
 	return buildMessage(from, to, cc, subject, markdownBody, htmlBody, attachments)
 }

@@ -180,6 +180,50 @@ The `signature` field in `[ui]` is appended automatically when opening a new com
 
 Use TOML triple-quoted strings (`"""`) to preserve line breaks. The signature appears at the end of the buffer — you can edit or delete it before saving.
 
+### HTML Signatures
+
+For professional HTML signatures (with logos, tables, styled text), use the `[ui.signature_block]` config with separate `text` and `html` fields:
+
+```toml
+[ui.signature_block]
+  text = """[html-signature]"""
+
+  html = """<table cellpadding="0" cellspacing="0" border="0" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333; margin-top: 20px;">
+  <tr>
+    <td style="padding-right: 20px; vertical-align: top;">
+      <img src="https://example.com/logo.png" alt="Company Name" width="80" style="display: block; border: 0;">
+    </td>
+    <td style="border-left: 2px solid #e0e0e0; padding-left: 20px;">
+      <div style="margin-bottom: 8px;">
+        <strong style="font-size: 16px; color: #1a1a1a;">Your Name</strong><br>
+        <span style="color: #666; font-size: 13px;">Your Title, Company Name</span>
+      </div>
+      <div style="margin-bottom: 6px; font-size: 13px; color: #888;">
+        <span>Connect:</span>
+        <a href="https://linkedin.com/in/..." style="text-decoration: none; margin: 0 4px;">LinkedIn</a>
+      </div>
+      <div style="font-size: 11px; color: #999; font-style: italic;">
+        sent from <a href="https://neomd.ssp.sh" style="text-decoration: none;">neomd</a>
+      </div>
+    </td>
+  </tr>
+</table>"""
+```
+
+**How it works:**
+
+- **Text signature** — appears in the editor buffer and in the `text/plain` MIME part
+- **HTML signature** — appends to the `text/html` MIME part only (recipients using HTML email clients see this)
+- **`[html-signature]` placeholder** — include this in your text signature to enable HTML signature for a specific email; visible in the editor and pre-send preview, but stripped before sending
+- **Per-email control** — delete the `[html-signature]` line in the editor to send without the HTML signature for that email
+
+**Notes:**
+
+- Use inline styles only (no `<style>` blocks or external CSS) for maximum email client compatibility
+- Host logo images externally (e.g., `https://example.com/logo.png`) so they display for recipients
+- The `text` field is backward compatible: if empty, neomd falls back to the legacy `signature` field
+- The `--` separator is added automatically before the text signature
+
 ## OAuth2 Authentication
 
 Neomd supports OpenAuth2 authenticated accounts, you just need to add `oauth2_client_id`, `oauth2_client_secret`, `oauth2_scopes` and `oauth2_issuer_url`.

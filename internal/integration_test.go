@@ -509,7 +509,7 @@ func TestIntegration_SaveSent(t *testing.T) {
 	body := "This email tests SaveSent IMAP APPEND."
 
 	// Build the message (same as neomd does before sending)
-	raw, err := smtp.BuildMessage(env.from, env.user, "", subject, body, nil)
+	raw, err := smtp.BuildMessage(env.from, env.user, "", subject, body, nil, "")
 	if err != nil {
 		t.Fatalf("BuildMessage: %v", err)
 	}
@@ -601,7 +601,7 @@ func TestIntegration_ReplyAllPreservesRecipients(t *testing.T) {
 	// The email lands in demo's Sent (via SaveSent) but also in demo's INBOX
 	// if demo is in CC. Since demo is not in To/CC here, we save to Sent to
 	// have a copy to inspect.
-	raw, err := smtp.BuildMessage(env.from, user2, user3, origSubject, origBody, nil)
+	raw, err := smtp.BuildMessage(env.from, user2, user3, origSubject, origBody, nil, "")
 	if err != nil {
 		t.Fatalf("BuildMessage: %v", err)
 	}
