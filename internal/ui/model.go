@@ -2437,7 +2437,7 @@ func addCmdHistory(history []string, input string) []string {
 // Call this whenever filterText changes.
 func (m *Model) applyFilter() tea.Cmd {
 	if m.filterText == "" {
-		return setEmails(&m.inbox, m.emails, m.markedUIDs, m.shouldPrefixFolderInSubject())
+		return setEmails(&m.inbox, m.emails, m.markedUIDs, m.shouldPrefixFolderInSubject(), m.sortField, m.sortReverse)
 	}
 	query := strings.ToLower(m.filterText)
 	var filtered []imap.Email
@@ -2447,7 +2447,7 @@ func (m *Model) applyFilter() tea.Cmd {
 			filtered = append(filtered, e)
 		}
 	}
-	return setEmails(&m.inbox, filtered, m.markedUIDs, m.shouldPrefixFolderInSubject())
+	return setEmails(&m.inbox, filtered, m.markedUIDs, m.shouldPrefixFolderInSubject(), m.sortField, m.sortReverse)
 }
 
 // handleChord dispatches two-key sequences (g<x>, M<x>, space<x>).

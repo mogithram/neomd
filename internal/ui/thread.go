@@ -46,8 +46,9 @@ type threadedEmail struct {
 //     stay separate.
 //
 // Each thread is sorted internally by date ascending (oldest = root at bottom,
-// newest replies on top). Threads are sorted by most recent email.
-func threadEmails(emails []imap.Email) []threadedEmail {
+// newest replies on top). Threads are sorted by the user's chosen sort field
+// and order (sortField: "date", "from", "subject", "size"; sortReverse: true/false).
+func threadEmails(emails []imap.Email, sortField string, sortReverse bool) []threadedEmail {
 	if len(emails) == 0 {
 		return nil
 	}
@@ -141,9 +142,26 @@ func threadEmails(emails []imap.Email) []threadedEmail {
 		threads = append(threads, thread{indices: indices, newestIdx: newest})
 	}
 
-	// Sort threads by most recent email (newest first).
+	// Sort threads by user's chosen sort field and order.
+	// We use the newest email in each thread as the representative for sorting.
 	sort.Slice(threads, func(i, j int) bool {
-		return emails[threads[i].newestIdx].Date.After(emails[threads[j].newestIdx].Date)
+		a := emails[threads[i].newestIdx]
+		b := emails[threads[j].newestIdx]
+		var less bool
+		switch sortField {
+		case "from":
+			less = strings.ToLower(a.From) < strings.ToLower(b.From)
+		case "subject":
+			less = strings.ToLower(a.Subject) < strings.ToLower(b.Subject)
+		case "size":
+			less = a.Size < b.Size
+		default: // "date"
+			less = a.Date.Before(b.Date)
+		}
+		if sortReverse {
+			return !less
+		}
+		return less
 	})
 
 	// Build output with thread connector lines.
