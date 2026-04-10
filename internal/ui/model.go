@@ -1385,6 +1385,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.activeFolderI = z.folderIndex
 					m.offTabFolder = ""
+					m.imapSearchText = ""
 					m.loading = true
 					return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 				}
@@ -2013,6 +2014,16 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 		}
+		if m.offTabFolder != "" {
+			m.offTabFolder = ""
+			// If we have a pending search query, restore search results instead of activeFolder
+			if m.imapSearchText != "" {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.imapSearchAllCmd(m.imapSearchText))
+			}
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
+		}
 
 	// ── Chord prefixes ──────────────────────────────────────────────
 	case "g":
@@ -2182,6 +2193,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeFolderI = (m.activeFolderI + 1) % len(m.folders)
 		m.offTabFolder = ""
 		m.imapSearchResults = false
+		m.imapSearchText = ""
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
@@ -2189,6 +2201,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeFolderI = (m.activeFolderI - 1 + len(m.folders)) % len(m.folders)
 		m.offTabFolder = ""
 		m.imapSearchResults = false
+		m.imapSearchText = ""
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
@@ -2452,12 +2465,14 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 		if key == "S" { // gS — go to Spam (not in tab rotation)
 			m.loading = true
 			m.offTabFolder = "Spam"
+			m.imapSearchText = ""
 			m.status = "Spam folder — press R to reload, tab to leave"
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Spam))
 		}
 		if key == "d" { // gd — go to Drafts (not in tab rotation)
 			m.loading = true
 			m.offTabFolder = "Drafts"
+			m.imapSearchText = ""
 			m.status = "Drafts folder — press R to reload, tab to leave"
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Drafts))
 		}
@@ -2486,6 +2501,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 					}
 					m.activeFolderI = i
 					m.offTabFolder = ""
+					m.imapSearchText = ""
 					m.loading = true
 					return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 				}
@@ -2506,9 +2522,12 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"t": m.cfg.Folders.Trash,
 			"o": m.cfg.Folders.ScreenedOut,
 			"w": m.cfg.Folders.Waiting,
-			"b": m.cfg.Folders.Work,
 			"m": m.cfg.Folders.Someday,
 			"k": m.cfg.Folders.ToScreen,
+		}
+		// Only add Work folder if configured
+		if m.cfg.Folders.Work != "" {
+			dstMap["b"] = m.cfg.Folders.Work
 		}
 		if dst, ok := dstMap[key]; ok {
 			m.loading = true
@@ -2682,12 +2701,23 @@ func (m Model) openInBrowser() (tea.Model, tea.Cmd) {
 		if a.ContentID == "" || len(a.Data) == 0 {
 			continue
 		}
-		imgPath := filepath.Join(neomdTempDir(), "cid-"+a.ContentID+"-"+a.Filename)
+		// Sanitize ContentID and Filename to prevent path traversal attacks
+		safeCID := strings.ReplaceAll(a.ContentID, string(os.PathSeparator), "_")
+		safeCID = strings.ReplaceAll(safeCID, "..", "_")
+		safeName := filepath.Base(a.Filename)
+
+		imgPath := filepath.Join(neomdTempDir(), "cid-"+safeCID+"-"+safeName)
+
+		// Verify the path is still under neomdTempDir()
+		if !strings.HasPrefix(imgPath, neomdTempDir()) {
+			continue
+		}
+
 		if err := os.WriteFile(imgPath, a.Data, 0600); err != nil {
 			continue
 		}
 		tmpImages = append(tmpImages, imgPath)
-		// Replace cid:XYZ with file:///path (case-insensitive)
+		// Replace cid:XYZ with file:///path (case-sensitive match)
 		htmlBody = strings.ReplaceAll(htmlBody, "cid:"+a.ContentID, "file://"+imgPath)
 	}
 
@@ -3959,7 +3989,7 @@ func (m Model) viewWelcome() string {
 		"Your screener lists are empty, so " + warn.Render("auto-screening") + "\n" +
 		warn.Render("is paused") + " until you classify your first senders.\n\n" +
 		title.Render("Getting started") + "\n" +
-		"1. Go to " + key.Render("Inbox") + " (once screener is active, use the " + key.Render("ToScreen") + " tab: " + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
+		"1. Go to " + key.Render("Inbox") + " tab; once screener is active, use " + key.Render("ToScreen") + " (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
 		"2. Screen each sender:\n" +
 		key.Render("   I") + "  screen " + title.Render("in") + "   " + dim.Render("sender stays in Inbox forever") + "\n" +
 		key.Render("   O") + "  screen " + title.Render("out") + "  " + dim.Render("sender never reaches Inbox again") + "\n" +

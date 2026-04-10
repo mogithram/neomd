@@ -20,6 +20,13 @@ func TestExpandEnv(t *testing.T) {
 		{"embedded dollar", "literal$value", "", "", "literal$value"},
 		{"multiple dollars", "pa$$word", "", "", "pa$$word"},
 		{"empty string", "", "", "", ""},
+		{"unset var bare", "$UNSET_NEOMD_VAR", "", "", ""},
+		{"unset var braced", "${UNSET_NEOMD_VAR}", "", "", ""},
+		{"bare $ alone", "$", "", "", ""},
+		{"empty braced ${}", "${}", "", "", ""},
+		{"whitespace trimmed", "  $MY_VAR  ", "MY_VAR", "trimmed", "trimmed"},
+		{"$VAR with suffix", "$MY_VAR-suffix", "", "", ""},
+		{"text before $VAR", "prefix-$MY_VAR", "", "", "prefix-$MY_VAR"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

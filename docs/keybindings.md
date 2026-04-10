@@ -35,6 +35,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `gk` | go to ToScreen |
 | `go` | go to ScreenedOut |
 | `gw` | go to Waiting |
+| `gb` | go to Work (if configured) |
 | `gm` | go to Someday |
 | `gd` | go to Drafts |
 | `ge` | go to Everything — latest 50 emails across all folders |
@@ -66,6 +67,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | `Mt` | move to Trash |
 | `Mo` | move to ScreenedOut |
 | `Mw` | move to Waiting |
+| `Mb` | move to Work (if configured) |
 | `Mm` | move to Someday |
 | `Mk` | move to ToScreen |
 
