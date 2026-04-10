@@ -392,8 +392,9 @@ type pendingSendData struct {
 	to, cc, bcc, subject, body string
 	// replyToUID/replyToFolder track the original email when this is a reply,
 	// so we can set \Answered after sending. Zero means not a reply.
-	replyToUID    uint32
-	replyToFolder string
+	replyToUID     uint32
+	replyToFolder  string
+	replyToAccount string
 }
 
 // undoMove records one IMAP move so it can be reversed with u.
@@ -713,7 +714,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder string) tea.Cmd {
+func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder, replyToAccount string) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -726,6 +727,7 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 	}
 	cli := m.imapCliForAccount(smtpAcct.Name)
 	sentFolder := m.cfg.Folders.Sent
+	replyCli := m.imapCliForAccount(replyToAccount)
 	return func() tea.Msg {
 		// Build raw MIME once — reused for both SMTP delivery and Sent copy.
 		// BCC is intentionally excluded from headers but included in RCPT TO.
@@ -743,7 +745,7 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 		}
 		// Mark original email as \Answered (non-fatal).
 		if replyToUID > 0 && replyToFolder != "" {
-			_ = cli.MarkAnswered(nil, replyToFolder, replyToUID)
+			_ = replyCli.MarkAnswered(nil, replyToFolder, replyToUID)
 		}
 		return sendDoneMsg{replyToUID: replyToUID, replyToFolder: replyToFolder}
 	}
@@ -1032,12 +1034,18 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 			if o.dst != "" && o.dst != o.srcFolder {
 				destUID, err := m.imapCli().MoveMessage(nil, o.srcFolder, o.uid, o.dst)
 				if err != nil {
+					var rollbackErrs []string
 					for j := len(undos) - 1; j >= 0; j-- {
 						u := undos[j]
-						_, _ = m.imapCli().MoveMessage(nil, u.toFolder, u.uid, u.fromFolder)
+						if _, undoErr := m.imapCli().MoveMessage(nil, u.toFolder, u.uid, u.fromFolder); undoErr != nil {
+							rollbackErrs = append(rollbackErrs, fmt.Sprintf("%s:%d→%s (%v)", u.toFolder, u.uid, u.fromFolder, undoErr))
+						}
 					}
 					if restoreErr := sc.Restore(snapshot); restoreErr != nil {
-						return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w (rollback failed: %v)", i, len(expandedOps), err, restoreErr)}
+						rollbackErrs = append(rollbackErrs, "screener restore: "+restoreErr.Error())
+					}
+					if len(rollbackErrs) > 0 {
+						return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w (rollback failed: %s)", i, len(expandedOps), err, strings.Join(rollbackErrs, "; "))}
 					}
 					return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(expandedOps), err)}
 				}
@@ -1412,6 +1420,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filterText = ""
 		if m.status == "" && m.startupNotice != "" {
 			m.status = m.startupNotice
+			m.startupNotice = ""
 		}
 		sortCmd := m.sortEmails() // applies sort and sets list items
 
@@ -1806,8 +1815,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.openEmail != nil && strings.HasPrefix(strings.ToLower(msg.subject), "re:") {
 			m.pendingSend.replyToUID = m.openEmail.UID
 			m.pendingSend.replyToFolder = m.openEmail.Folder
+			m.pendingSend.replyToAccount = m.activeAccount().Name
 		}
 		m.state = statePresend
+		m.status = ""
+		m.isError = false
 		return m, nil
 
 	case attachPickDoneMsg:
@@ -2227,6 +2239,8 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		m.attachments = nil
 		m.state = stateCompose
+		m.status = ""
+		m.isError = false
 		m.compose.reset()
 		m.presendFromI = 0
 		return m, nil
@@ -2927,6 +2941,8 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 	cmd := exec.Command(editorBin, tmpPath)
 	draftBackups := m.cfg.UI.DraftBackups()
 	m.state = stateCompose
+	m.status = ""
+	m.isError = false
 	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
 		backupDraft(tmpPath, draftBackups)
 		defer os.Remove(tmpPath)
@@ -3005,6 +3021,10 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.presendFromI = (m.presendFromI + 1) % len(froms)
 		return m, nil
 	}
+	if m.status != "" {
+		m.status = ""
+		m.isError = false
+	}
 
 	var cmd tea.Cmd
 	var launch bool
@@ -3050,7 +3070,7 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		replyUID, replyFolder := ps.replyToUID, ps.replyToFolder
 		m.attachments = nil
 		m.pendingSend = nil
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder))
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder, ps.replyToAccount))
 	case "ctrl+f":
 		froms := m.presendFroms()
 		if len(froms) <= 1 {
@@ -3104,6 +3124,10 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.beginDiscardConfirm()
 		return m, nil
+	}
+	if m.status != "" {
+		m.status = ""
+		m.isError = false
 	}
 	return m, nil
 }
@@ -3929,13 +3953,13 @@ func (m Model) viewWelcome() string {
 		title.Render("Quick start") + "\n" +
 		key.Render("  j/k") + "  navigate    " + key.Render("enter") + "  open email\n" +
 		key.Render("  c") + "    compose      " + key.Render("r") + "      reply\n" +
-		key.Render("  f") + "    forward      " + key.Render("R") + "      reply-all\n" +
+		key.Render("  f") + "    forward      " + key.Render("ctrl+r") + "  reply-all\n" +
 		key.Render("  ]") + " / " + key.Render("[") + "  next/prev tab  " + key.Render("?") + "  all keys\n\n" +
 		title.Render("How the Screener works") + "\n" +
 		"Your screener lists are empty, so " + warn.Render("auto-screening") + "\n" +
 		warn.Render("is paused") + " until you classify your first senders.\n\n" +
 		title.Render("Getting started") + "\n" +
-		"1. Go to " + key.Render("Inbox") + " (once screener active, it will be " + key.Render("ToScreen") + "tab (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
+		"1. Go to " + key.Render("Inbox") + " (once screener is active, use the " + key.Render("ToScreen") + " tab: " + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
 		"2. Screen each sender:\n" +
 		key.Render("   I") + "  screen " + title.Render("in") + "   " + dim.Render("sender stays in Inbox forever") + "\n" +
 		key.Render("   O") + "  screen " + title.Render("out") + "  " + dim.Render("sender never reaches Inbox again") + "\n" +

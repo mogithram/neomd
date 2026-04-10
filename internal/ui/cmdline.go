@@ -32,6 +32,11 @@ func init() {
 			aliases: []string{"s"},
 			desc:    "screen currently loaded emails only (up to inbox_count)",
 			run: func(m *Model) (tea.Model, tea.Cmd) {
+				if err := m.validateScreenerSafety(); err != nil {
+					m.status = err.Error()
+					m.isError = true
+					return m, nil
+				}
 				moves := m.previewAutoScreen()
 				if len(moves) == 0 {
 					m.status = "Nothing to screen — all senders already classified."
@@ -47,6 +52,11 @@ func init() {
 			aliases: []string{"sa", "screen-a"},
 			desc:    "fetch and screen EVERY inbox email, no limit (use after updating screener lists)",
 			run: func(m *Model) (tea.Model, tea.Cmd) {
+				if err := m.validateScreenerSafety(); err != nil {
+					m.status = err.Error()
+					m.isError = true
+					return m, nil
+				}
 				m.loading = true
 				return m, m.deepScreenCmd()
 			},
