@@ -101,6 +101,12 @@ Or in Gmail:
 
 **Prerequisites:** [Go 1.22+](https://go.dev/doc/install) and `make`.
 
+> [!NOTE]
+> **Optional attachment helpers:**
+> - `yazi` enables the built-in file picker used by pre-send `a`
+> - custom Neovim integration in `custom.lua` enables inline `<leader>a` attachment insertion inside `neomd-*.md` buffers
+> - without these, neomd still works; the inline Neovim attachment workflow just won't be available
+
 ```sh
 git clone https://github.com/ssp-data/neomd
 cd neomd

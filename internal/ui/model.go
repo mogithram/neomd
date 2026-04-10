@@ -169,6 +169,24 @@ func neomdTempDir() string {
 	return dir
 }
 
+func detectStartupNotice() string {
+	_, hasYazi := exec.LookPath("yazi")
+	home, _ := os.UserHomeDir()
+	customLua := filepath.Join(home, ".config", "nvim", "lua", "sspaeti", "custom.lua")
+	_, customLuaErr := os.Stat(customLua)
+
+	switch {
+	case hasYazi != nil && customLuaErr != nil:
+		return "Optional inline <leader>a attachments in nvim are unavailable: install yazi and add the custom.lua integration. Pre-send 'a' still works."
+	case hasYazi != nil:
+		return "Optional inline <leader>a attachments in nvim are unavailable: install yazi. Pre-send 'a' still works."
+	case customLuaErr != nil:
+		return "Optional inline <leader>a attachments in nvim are not configured. Add the custom.lua integration if you want that workflow; pre-send 'a' still works."
+	default:
+		return ""
+	}
+}
+
 // backupFile holds a backup's full path and modification time.
 type backupFile struct {
 	path    string
@@ -433,8 +451,9 @@ type Model struct {
 	presendFromI int // index into presendFroms() for the From field cycle
 
 	// Status / error
-	status  string
-	isError bool
+	status        string
+	isError       bool
+	startupNotice string
 
 	// Auto-screen dry-run: populated by S, cleared by y/n
 	pendingMoves []autoScreenMove
@@ -457,8 +476,10 @@ type Model struct {
 	// prevState is the state to return to when closing the help overlay
 	prevState viewState
 
-	// helpSearch is the live filter string typed in the help overlay
-	helpSearch string
+	// helpSearch / helpScroll track the ? overlay state.
+	helpSearch       string
+	helpSearchActive bool
+	helpScroll       int
 
 	// cmdMode / cmdText / cmdTabI implement vim-style ":" command line.
 	cmdMode    bool
@@ -515,11 +536,12 @@ func New(cfg *config.Config, clients []*imap.Client, sc *screener.Screener) Mode
 		cmdHistory: loadCmdHistory(config.HistoryPath()),
 		cmdHistI:   -1,
 		// Note: Spam is intentionally excluded from tabs — use :go-spam to visit.
-		compose:     compose,
-		spinner:     sp,
-		markedUIDs:  make(map[uint32]bool),
-		sortField:   "date",
-		sortReverse: true, // newest first
+		compose:       compose,
+		spinner:       sp,
+		markedUIDs:    make(map[uint32]bool),
+		startupNotice: detectStartupNotice(),
+		sortField:     "date",
+		sortReverse:   true, // newest first
 	}
 }
 
@@ -610,6 +632,12 @@ func (m Model) Init() tea.Cmd {
 
 // activeFolder maps the active tab label to an IMAP mailbox name.
 func (m Model) activeFolder() string {
+	switch m.offTabFolder {
+	case "Drafts":
+		return m.cfg.Folders.Drafts
+	case "Spam":
+		return m.cfg.Folders.Spam
+	}
 	switch m.folders[m.activeFolderI] {
 	case "ToScreen":
 		return m.cfg.Folders.ToScreen
@@ -1212,6 +1240,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.markedUIDs = make(map[uint32]bool) // clear marks on folder reload
 		m.filterActive = false
 		m.filterText = ""
+		if m.status == "" && m.startupNotice != "" {
+			m.status = m.startupNotice
+		}
 		sortCmd := m.sortEmails() // applies sort and sets list items
 
 		// First-run welcome: show a brief intro popup.
@@ -1603,6 +1634,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = m.prevState
 			} else {
 				m.prevState = m.state
+				m.helpSearch = ""
+				m.helpSearchActive = false
+				m.helpScroll = 0
 				m.state = stateHelp
 			}
 			return m, nil
@@ -1765,6 +1799,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
+		if m.filterText != "" {
+			m.filterActive = false
+			m.filterText = ""
+			return m, m.applyFilter()
+		}
 		if m.imapSearchResults {
 			m.imapSearchResults = false
 			m.imapSearchText = ""
@@ -2690,9 +2729,11 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+f":
 		froms := m.presendFroms()
-		if len(froms) > 1 {
-			m.presendFromI = (m.presendFromI + 1) % len(froms)
+		if len(froms) <= 1 {
+			m.status = "Only one From address configured. Add another account or [[senders]] alias to cycle."
+			return m, nil
 		}
+		m.presendFromI = (m.presendFromI + 1) % len(froms)
 		return m, nil
 	}
 
@@ -2726,9 +2767,11 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder))
 	case "ctrl+f":
 		froms := m.presendFroms()
-		if len(froms) > 1 {
-			m.presendFromI = (m.presendFromI + 1) % len(froms)
+		if len(froms) <= 1 {
+			m.status = "Only one From address configured. Add another account or [[senders]] alias to cycle."
+			return m, nil
 		}
+		m.presendFromI = (m.presendFromI + 1) % len(froms)
 		return m, nil
 	case "a":
 		return m.launchAttachPickerCmd()
@@ -3389,7 +3432,7 @@ func (m Model) viewPresend() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(styleHelp.Render("  enter send · s spell · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · e edit · d draft · esc cancel · x discard"))
+	b.WriteString(styleHelp.Render("  enter send · s spell+edit · e edit · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · d draft · esc cancel · x discard"))
 	return b.String()
 }
 
@@ -3490,34 +3533,65 @@ func (m Model) viewCompose() string {
 func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.helpSearch != "" {
-			m.helpSearch = "" // first esc clears filter
+		if m.helpSearchActive {
+			if m.helpSearch != "" {
+				m.helpSearch = ""
+				m.helpScroll = 0
+			} else {
+				m.helpSearchActive = false
+			}
+		} else if m.helpSearch != "" {
+			m.helpSearch = ""
+			m.helpScroll = 0
 		} else {
 			m.state = m.prevState
 		}
+	case "enter":
+		if m.helpSearchActive {
+			m.helpSearchActive = false
+		}
 	case "q":
-		if m.helpSearch == "" {
+		if !m.helpSearchActive {
 			m.state = m.prevState
 		} else {
 			m.helpSearch += "q"
 		}
-	case "backspace":
-		if len(m.helpSearch) > 0 {
-			m.helpSearch = m.helpSearch[:len([]rune(m.helpSearch))-1]
+	case "backspace", "ctrl+h":
+		if m.helpSearchActive && len(m.helpSearch) > 0 {
+			runes := []rune(m.helpSearch)
+			m.helpSearch = string(runes[:len(runes)-1])
+			m.helpScroll = 0
 		}
 	case "/":
-		// already in search mode — "/" is just a printable char if search active
-		if m.helpSearch == "" {
-			// start typing to search; "/" itself doesn't appear
-		} else {
+		if m.helpSearchActive {
 			m.helpSearch += "/"
+			m.helpScroll = 0
+		} else {
+			m.helpSearchActive = true
+		}
+	case "j", "down":
+		if !m.helpSearchActive {
+			m.helpScroll++
+		}
+	case "k", "up":
+		if !m.helpSearchActive && m.helpScroll > 0 {
+			m.helpScroll--
+		}
+	case "d", "ctrl+d":
+		if !m.helpSearchActive {
+			m.helpScroll += m.helpPageSize()
+		}
+	case "u", "ctrl+u":
+		if !m.helpSearchActive {
+			m.helpScroll -= m.helpPageSize()
 		}
 	default:
-		// printable single character: append to search
-		if len(msg.String()) == 1 {
+		if m.helpSearchActive && len(msg.String()) == 1 {
 			m.helpSearch += msg.String()
+			m.helpScroll = 0
 		}
 	}
+	m.clampHelpScroll()
 	return m, nil
 }
 
@@ -3556,6 +3630,7 @@ func (m Model) viewWelcome() string {
 		dim.Render("Once classified, senders are remembered forever.") + "\n" +
 		dim.Render("New emails auto-sort on every load. You choose") + "\n" +
 		dim.Render("who lands in your inbox. Bye-bye spam.") + "\n\n" +
+		dim.Render("Inline <leader>a attachments in nvim require custom.lua + yazi.") + "\n" +
 		dim.Render("Disable auto-screen: auto_screen_on_load = false") + "\n" +
 		dim.Render("Diagnostics: :debug   All keys: ?") + "\n\n" +
 		dim.Render("Press any key to continue.")
@@ -3594,8 +3669,7 @@ func (m Model) viewHelp() string {
 
 	filter := strings.ToLower(m.helpSearch)
 
-	var b strings.Builder
-	b.WriteString(heading + "\n" + sep + "\n")
+	lines := []string{heading, sep}
 	for _, sec := range HelpSections {
 		var matched [][2]string
 		for _, row := range sec.Rows {
@@ -3606,21 +3680,89 @@ func (m Model) viewHelp() string {
 		if len(matched) == 0 {
 			continue
 		}
-		b.WriteString("\n" + titleStyle.Render("  "+sec.Title) + "\n")
+		lines = append(lines, "", titleStyle.Render("  "+sec.Title))
 		for _, row := range matched {
-			b.WriteString("  " + keyStyle.Render(row[0]) + descStyle.Render(row[1]) + "\n")
+			lines = append(lines, "  "+keyStyle.Render(row[0])+descStyle.Render(row[1]))
 		}
 	}
 
-	// Search bar
 	var searchLine string
-	if filter != "" {
-		searchLine = matchStyle.Render("  /"+m.helpSearch) + styleHelp.Render("  · esc to clear")
+	if m.helpSearchActive {
+		searchLine = matchStyle.Render("  /"+m.helpSearch+"█") + styleHelp.Render("  · enter done · esc clear")
+	} else if filter != "" {
+		searchLine = matchStyle.Render("  /"+m.helpSearch) + styleHelp.Render("  · j/k scroll · / edit filter · esc clear")
 	} else {
-		searchLine = styleHelp.Render("  type to filter · ? or q to close")
+		searchLine = styleHelp.Render("  j/k scroll · d/u page · / filter · ? or q close")
 	}
-	b.WriteString("\n" + searchLine)
+
+	contentHeight := m.height - 1
+	if contentHeight < 1 {
+		contentHeight = len(lines)
+	}
+	start := m.helpScroll
+	if start < 0 {
+		start = 0
+	}
+	maxStart := len(lines) - contentHeight
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if start > maxStart {
+		start = maxStart
+	}
+	end := start + contentHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var b strings.Builder
+	for _, line := range lines[start:end] {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(searchLine)
 	return b.String()
+}
+
+func (m Model) helpPageSize() int {
+	if m.height <= 8 {
+		return 1
+	}
+	return (m.height - 4) / 2
+}
+
+func (m Model) helpContentLineCount() int {
+	filter := strings.ToLower(m.helpSearch)
+	count := 2
+	for _, sec := range HelpSections {
+		matched := 0
+		for _, row := range sec.Rows {
+			if filter == "" || strings.Contains(strings.ToLower(row[0]), filter) || strings.Contains(strings.ToLower(row[1]), filter) {
+				matched++
+			}
+		}
+		if matched == 0 {
+			continue
+		}
+		count += 2 + matched
+	}
+	return count
+}
+
+func (m *Model) clampHelpScroll() {
+	if m.helpScroll < 0 {
+		m.helpScroll = 0
+	}
+	contentHeight := m.height - 1
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	maxScroll := m.helpContentLineCount() - contentHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.helpScroll > maxScroll {
+		m.helpScroll = maxScroll
+	}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

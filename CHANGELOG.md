@@ -1,5 +1,13 @@
 # Changelog
 
+# 2026-04-10
+- **Issue #6 verification pass** — reviewed the user report against the current code and  specifically verified that startup auto-screening does not route Inbox mail to Trash in the current implementation, while manual `ToScreen` screening remains message-by-message by design
+- **Fix: Drafts/Spam reload off-tab folder mismatch** — reloading while viewing an off-tab folder now reloads that actual mailbox instead of the currently selected tab's folder; fixes the confusing case where Drafts could show Inbox content after pressing `R`
+- **Fix: committed `/` filter now clears with `esc`** — pressing `esc` now reliably clears the in-memory inbox filter even after the filter was already applied
+- **Help overlay improvements** — `?` help is now scrollable with `j/k`, arrow keys, and `d/u`; search begins only after pressing `/`, so opening help no longer immediately behaves like a search prompt
+- **Attachment workflow guidance** — startup/welcome messaging now warns when the optional inline Neovim attachment integration is unavailable; README install docs now list `yazi` and the external `custom.lua` integration as optional requirements for `<leader>a`, while clarifying that pre-send `a` still works independently
+- **UX hints** — inbox footer now exposes `, sort`; pre-send footer clarifies `s` as spell-check-and-edit versus plain `e` edit; compose/pre-send `ctrl+f` now shows a message when only one From identity is configured
+
 # 2026-04-09
 - **Fix: non-standard IMAP/SMTP ports** — neomd now correctly handles non-standard ports (e.g., Proton Mail Bridge on `127.0.0.1:1143` and `127.0.0.1:1025`); previously hardcoded port-based logic ignored the user's `starttls` config and refused unencrypted connections to any port other than 993/143 (IMAP) or 465/587 (SMTP); new behavior: user's explicit `starttls = true` always forces STARTTLS, standard ports use their defaults (993→TLS, 143→STARTTLS, 465→TLS, 587→STARTTLS), non-standard ports default to TLS for security (user must set `starttls = true` if their provider uses STARTTLS on a custom port); fixes "refusing unencrypted connection to 127.0.0.1:1143" error reported by Proton Bridge users; comprehensive test coverage added for all port/config combinations
 
