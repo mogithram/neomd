@@ -12,6 +12,7 @@ type HelpSection struct {
 var HelpSections = []HelpSection{
 	{"Navigation", [][2]string{
 		{"j / k", "move down / up"},
+		{"d / u", "page down / up in inbox/help"},
 		{"gg", "jump to top"},
 		{"G", "jump to bottom"},
 		{"enter / l", "open email"},

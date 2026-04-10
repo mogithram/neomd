@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -506,6 +507,9 @@ type Model struct {
 	// pendingDeleteAll holds UIDs + folder awaiting y/n before permanent deletion.
 	pendingDeleteAll *deleteAllReadyMsg
 
+	// pendingDiscard asks for y/n confirmation before dropping unsent compose state.
+	pendingDiscard bool
+
 	// folderCounts holds unseen message counts for watched folder tabs.
 	// Keys are tab labels: "Inbox", "PaperTrail", "Waiting", "Scheduled".
 	folderCounts map[string]int
@@ -784,6 +788,66 @@ func (m Model) targetEmails() []imap.Email {
 	return nil
 }
 
+func normalizedSender(from string) string {
+	return strings.ToLower(extractEmailAddr(from))
+}
+
+func (m Model) validateScreenerSafety() error {
+	dests := map[string]string{
+		"ToScreen":    m.cfg.Folders.ToScreen,
+		"ScreenedOut": m.cfg.Folders.ScreenedOut,
+		"Feed":        m.cfg.Folders.Feed,
+		"PaperTrail":  m.cfg.Folders.PaperTrail,
+		"Spam":        m.cfg.Folders.Spam,
+	}
+	for name, folder := range dests {
+		if folder != "" && folder == m.cfg.Folders.Trash {
+			return fmt.Errorf("unsafe folder config: %s points to Trash (%s); refusing to screen until config is fixed", name, folder)
+		}
+	}
+	return nil
+}
+
+func (m Model) inboxPageStep() int {
+	if m.height <= 8 {
+		return 10
+	}
+	return m.height - 6
+}
+
+func (m Model) hasComposeDraft() bool {
+	if m.pendingSend != nil {
+		if strings.TrimSpace(m.pendingSend.to) != "" ||
+			strings.TrimSpace(m.pendingSend.cc) != "" ||
+			strings.TrimSpace(m.pendingSend.bcc) != "" ||
+			strings.TrimSpace(m.pendingSend.subject) != "" ||
+			strings.TrimSpace(m.pendingSend.body) != "" {
+			return true
+		}
+	}
+	if strings.TrimSpace(m.compose.to.Value()) != "" ||
+		strings.TrimSpace(m.compose.cc.Value()) != "" ||
+		strings.TrimSpace(m.compose.bcc.Value()) != "" ||
+		strings.TrimSpace(m.compose.subject.Value()) != "" {
+		return true
+	}
+	return len(m.attachments) > 0
+}
+
+func (m *Model) beginDiscardConfirm() {
+	m.pendingDiscard = true
+	m.status = "Discard unsent message?  · y discard, n keep editing"
+	m.isError = true
+}
+
+func (m *Model) cancelDiscardConfirm() {
+	m.pendingDiscard = false
+	if m.status == "Discard unsent message?  · y discard, n keep editing" {
+		m.status = ""
+		m.isError = false
+	}
+}
+
 // batchMoveCmd moves a slice of emails to dst, emitting batchDoneMsg.
 func (m Model) batchMoveCmd(emails []imap.Email, dst string) tea.Cmd {
 	type mv struct {
@@ -853,11 +917,51 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 	}
 	bp := m.bulkProgress
 	return func() tea.Msg {
-		for i, o := range ops {
+		if err := m.validateScreenerSafety(); err != nil {
+			return batchDoneMsg{err: err}
+		}
+		expandedOps := ops
+		if len(emails) == 1 && len(m.markedUIDs) == 0 && emails[0].Folder == cfg.Folders.ToScreen {
+			sender := normalizedSender(emails[0].From)
+			uids, err := m.imapCli().SearchUIDs(nil, cfg.Folders.ToScreen)
+			if err != nil {
+				return batchDoneMsg{err: err}
+			}
+			expandedOps = nil
+			for start := 0; start < len(uids); start += 200 {
+				end := start + 200
+				if end > len(uids) {
+					end = len(uids)
+				}
+				batch, err := m.imapCli().FetchHeadersByUID(nil, cfg.Folders.ToScreen, uids[start:end])
+				if err != nil {
+					return batchDoneMsg{err: err}
+				}
+				for _, e := range batch {
+					if normalizedSender(e.From) == sender {
+						var dst string
+						switch action {
+						case "I":
+							dst = cfg.Folders.Inbox
+						case "O":
+							dst = cfg.Folders.ScreenedOut
+						case "F":
+							dst = cfg.Folders.Feed
+						case "P":
+							dst = cfg.Folders.PaperTrail
+						case "$":
+							dst = cfg.Folders.Spam
+						}
+						expandedOps = append(expandedOps, op{e.From, e.Folder, e.UID, dst})
+					}
+				}
+			}
+		}
+		for i, o := range expandedOps {
 			// Move first, classify after — if move fails, screener file stays unchanged.
 			if o.dst != "" && o.dst != o.srcFolder {
 				if _, err := m.imapCli().MoveMessage(nil, o.srcFolder, o.uid, o.dst); err != nil {
-					return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(ops), err)}
+					return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(expandedOps), err)}
 				}
 			}
 			var err error
@@ -874,7 +978,7 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 				err = sc.MarkSpam(o.from)
 			}
 			if err != nil {
-				return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(ops), err)}
+				return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(expandedOps), err)}
 			}
 			if bp != nil {
 				bp.moved.Add(1)
@@ -940,6 +1044,9 @@ func (m Model) batchToggleSeenCmd(emails []imap.Email) tea.Cmd {
 // lookups) and returns planned moves. emails must live at least as long as the
 // returned moves (pointers into the slice are stored).
 func (m Model) classifyForScreen(emails []imap.Email) []autoScreenMove {
+	if m.validateScreenerSafety() != nil {
+		return nil
+	}
 	inboxFolder := m.cfg.Folders.Inbox
 	var moves []autoScreenMove
 	for i := range emails {
@@ -1259,6 +1366,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Skip when all screener lists are empty — otherwise every email would
 		// be moved to ToScreen on first run, confusing new users.
 		if msg.folder == m.cfg.Folders.Inbox && m.cfg.UI.AutoScreen() && !m.screener.IsEmpty() {
+			if err := m.validateScreenerSafety(); err != nil {
+				m.status = err.Error()
+				m.isError = true
+				return m, tea.Batch(sortCmd, m.fetchFolderCountsCmd())
+			}
 			if moves := m.previewAutoScreen(); len(moves) > 0 {
 				m.loading = true
 				m.bulkProgress = m.newBulkOp("Screening", len(moves))
@@ -1462,6 +1574,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
 	case deepScreenCountMsg:
+		if err := m.validateScreenerSafety(); err != nil {
+			m.loading = false
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		// Phase 1 done: we know how many emails exist. Show count and kick off phase 2.
 		m.status = fmt.Sprintf("Screen-all: found %d emails — fetching headers in batches…", msg.total)
 		return m, tea.Batch(m.spinner.Tick, m.deepScreenClassifyCmd(nil, msg.uids, msg.total))
@@ -1562,6 +1680,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.bgFetchInboxCmd(), m.scheduleBgSync())
 
 	case bgInboxFetchedMsg:
+		if err := m.validateScreenerSafety(); err != nil {
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		moves := m.classifyForScreen(msg.emails)
 		if len(moves) == 0 {
 			return m, nil
@@ -1588,18 +1711,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editorDoneMsg:
 		if msg.err != nil {
+			m.attachments = nil
 			m.status = msg.err.Error()
 			m.isError = true
 			m.state = stateInbox
 			return m, nil
 		}
 		if msg.aborted {
-			m.status = "Aborted (no changes saved)."
+			m.attachments = nil
+			m.status = "Aborted (no changes saved). Use :recover to reopen the latest backup."
 			m.state = stateInbox
 			return m, nil
 		}
 		if strings.TrimSpace(msg.body) == "" {
-			m.status = "Cancelled (empty body)."
+			m.attachments = nil
+			m.status = "Cancelled (empty body). Use :recover if you want the latest backup."
 			m.state = stateInbox
 			return m, nil
 		}
@@ -1905,6 +2031,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.folders[m.activeFolderI] != "Inbox" {
 			break
 		}
+		if err := m.validateScreenerSafety(); err != nil {
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		moves := m.previewAutoScreen()
 		if len(moves) == 0 {
 			m.status = "Nothing to screen — all senders already classified."
@@ -1989,6 +2120,24 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inbox.Select(len(m.inbox.Items()) - 1)
 		return m, nil
 
+	case "d":
+		next := m.inbox.Index() + m.inboxPageStep()
+		if max := len(m.inbox.Items()) - 1; next > max {
+			next = max
+		}
+		if next >= 0 {
+			m.inbox.Select(next)
+		}
+		return m, nil
+
+	case "u":
+		prev := m.inbox.Index() - m.inboxPageStep()
+		if prev < 0 {
+			prev = 0
+		}
+		m.inbox.Select(prev)
+		return m, nil
+
 	case "/":
 		m.filterActive = true
 		m.filterText = ""
@@ -2012,6 +2161,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "c":
+		m.attachments = nil
 		m.state = stateCompose
 		m.compose.reset()
 		m.presendFromI = 0
@@ -2714,10 +2864,32 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDiscard {
+		switch msg.String() {
+		case "y":
+			m.pendingDiscard = false
+			m.attachments = nil
+			m.pendingSend = nil
+			m.state = stateInbox
+			m.status = "Discarded. Use :recover to reopen the latest backup if needed."
+			m.isError = false
+			return m, nil
+		case "n", "esc":
+			m.cancelDiscardConfirm()
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
-		m.attachments = nil
+		if m.hasComposeDraft() {
+			m.beginDiscardConfirm()
+			return m, nil
+		}
 		m.state = stateInbox
+		m.status = "Cancelled."
 		return m, nil
 	case "ctrl+t":
 		return m.launchAttachPickerCmd()
@@ -2753,6 +2925,23 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if ps == nil {
 		m.state = stateInbox
 		return m, nil
+	}
+	if m.pendingDiscard {
+		switch msg.String() {
+		case "y":
+			m.pendingDiscard = false
+			m.attachments = nil
+			m.pendingSend = nil
+			m.state = stateInbox
+			m.status = "Discarded. Use :recover to reopen the latest backup if needed."
+			m.isError = false
+			return m, nil
+		case "n", "esc":
+			m.cancelDiscardConfirm()
+			return m, nil
+		default:
+			return m, nil
+		}
 	}
 	switch msg.String() {
 	case "enter":
@@ -2811,20 +3000,12 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "x":
-		// Discard the email entirely — clear everything and go back to inbox.
-		m.attachments = nil
-		m.pendingSend = nil
-		m.state = stateInbox
-		m.status = "Discarded."
-		m.isError = false
+		m.beginDiscardConfirm()
 		return m, nil
 	case "p":
 		return m.previewInBrowser()
 	case "esc":
-		m.attachments = nil
-		m.pendingSend = nil
-		m.state = stateInbox
-		m.status = "Cancelled."
+		m.beginDiscardConfirm()
 		return m, nil
 	}
 	return m, nil
@@ -3431,8 +3612,11 @@ func (m Model) viewPresend() string {
 		}
 		b.WriteString("\n")
 	}
-
-	b.WriteString(styleHelp.Render("  enter send · s spell+edit · e edit · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · d draft · esc cancel · x discard"))
+	if m.status != "" {
+		b.WriteString(statusBar(m.status, m.isError))
+	} else {
+		b.WriteString(styleHelp.Render("  enter send · e edit · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · d draft · esc cancel · x discard"))
+	}
 	return b.String()
 }
 
@@ -3488,6 +3672,9 @@ func (m Model) viewInbox() string {
 		if len(m.accounts) > 1 {
 			help += styleHelp.Render(" · ctrl+a switch account")
 		}
+		if len(m.emails) > 0 {
+			help += styleDate.Render(fmt.Sprintf("  │  %d loaded", len(m.emails)))
+		}
 		b.WriteString(help)
 	}
 	return b.String()
@@ -3526,7 +3713,11 @@ func (m Model) viewCompose() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(composeHelp(int(m.compose.step), len(m.presendFroms()) > 1))
+	if m.status != "" {
+		b.WriteString(statusBar(m.status, m.isError))
+	} else {
+		b.WriteString(composeHelp(int(m.compose.step), len(m.presendFroms()) > 1))
+	}
 	return b.String()
 }
 
@@ -3626,7 +3817,9 @@ func (m Model) viewWelcome() string {
 		key.Render("   O") + "  screen " + title.Render("out") + "  " + dim.Render("sender never reaches Inbox again") + "\n" +
 		key.Render("   F") + "  feed        " + dim.Render("newsletters go to Feed tab") + "\n" +
 		key.Render("   P") + "  papertrail  " + dim.Render("receipts go to PaperTrail tab") + "\n" +
-		"3. Use " + key.Render("m") + " to mark multiple, then " + key.Render("I") + " to batch-approve\n\n" +
+		"3. Use " + key.Render("m") + " to mark multiple, then " + key.Render("I") + " to batch-approve\n" +
+		"4. Normal loads only screen the newest " + key.Render(strconv.Itoa(m.cfg.UI.InboxCount)) + " Inbox emails\n" +
+		"5. Use " + key.Render(":screen-all") + " for the full Inbox on the server " + dim.Render("(slower; mailbox-wide)") + "\n\n" +
 		dim.Render("Once classified, senders are remembered forever.") + "\n" +
 		dim.Render("New emails auto-sort on every load. You choose") + "\n" +
 		dim.Render("who lands in your inbox. Bye-bye spam.") + "\n\n" +

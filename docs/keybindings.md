@@ -12,6 +12,7 @@ Press `?` inside neomd to open the interactive help overlay. Start typing to fil
 | Key | Action |
 |-----|--------|
 | `j / k` | move down / up |
+| `d / u` | page down / up in inbox/help |
 | `gg` | jump to top |
 | `G` | jump to bottom |
 | `enter / l` | open email |

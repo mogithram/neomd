@@ -184,3 +184,81 @@ func TestUpdateInboxEscClearsCommittedFilter(t *testing.T) {
 		t.Fatal("filterActive should be false after esc")
 	}
 }
+
+func TestValidateScreenerSafetyRejectsTrashDestination(t *testing.T) {
+	m := Model{
+		cfg: &config.Config{
+			Folders: config.FoldersConfig{
+				Trash:       "Trash",
+				ScreenedOut: "Trash",
+			},
+		},
+	}
+
+	err := m.validateScreenerSafety()
+	if err == nil {
+		t.Fatal("expected validateScreenerSafety to fail when ScreenedOut points to Trash")
+	}
+}
+
+func TestUpdateComposeEscRequestsDiscardConfirmation(t *testing.T) {
+	m := Model{
+		compose: newComposeModel(),
+	}
+	m.compose.to.SetValue("alice@example.com")
+	m.state = stateCompose
+
+	next, _ := m.updateCompose(tea.KeyMsg{Type: tea.KeyEsc})
+	got := next.(Model)
+	if !got.pendingDiscard {
+		t.Fatal("expected pendingDiscard after esc with unsent compose data")
+	}
+	if got.state != stateCompose {
+		t.Fatalf("state = %v, want compose", got.state)
+	}
+	if got.status == "" {
+		t.Fatal("expected discard confirmation status")
+	}
+}
+
+func TestUpdateComposeDiscardConfirmationYClearsState(t *testing.T) {
+	m := Model{
+		compose:        newComposeModel(),
+		attachments:    []string{"/tmp/file.txt"},
+		pendingDiscard: true,
+		state:          stateCompose,
+	}
+	m.compose.to.SetValue("alice@example.com")
+
+	next, _ := m.updateCompose(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	got := next.(Model)
+	if got.pendingDiscard {
+		t.Fatal("pendingDiscard should be cleared after confirming discard")
+	}
+	if got.state != stateInbox {
+		t.Fatalf("state = %v, want inbox", got.state)
+	}
+	if len(got.attachments) != 0 {
+		t.Fatalf("attachments = %#v, want cleared", got.attachments)
+	}
+}
+
+func TestUpdatePresendEscRequestsDiscardConfirmation(t *testing.T) {
+	m := Model{
+		pendingSend: &pendingSendData{
+			to:      "alice@example.com",
+			subject: "hello",
+			body:    "body",
+		},
+		state: statePresend,
+	}
+
+	next, _ := m.updatePresend(tea.KeyMsg{Type: tea.KeyEsc})
+	got := next.(Model)
+	if !got.pendingDiscard {
+		t.Fatal("expected pendingDiscard after esc in pre-send")
+	}
+	if got.state != statePresend {
+		t.Fatalf("state = %v, want pre-send", got.state)
+	}
+}
