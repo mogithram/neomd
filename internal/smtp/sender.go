@@ -258,12 +258,11 @@ func BuildMessage(from, to, cc, subject, markdownBody string, attachments []stri
 // BuildDraftMessage constructs a raw MIME draft for IMAP APPEND.
 // Unlike SMTP delivery, drafts should retain the Bcc header so the user's
 // intent survives round-tripping through Drafts.
+// Drafts are stored as plain text only (no HTML conversion) to preserve the
+// original markdown formatting exactly during save/load cycles.
 func BuildDraftMessage(from, to, cc, bcc, subject, markdownBody string, attachments []string) ([]byte, error) {
-	htmlBody, err := render.ToHTML(markdownBody)
-	if err != nil {
-		return nil, fmt.Errorf("markdown to html: %w", err)
-	}
-	return buildMessageWithBCC(from, to, cc, bcc, subject, markdownBody, htmlBody, attachments)
+	// Pass empty htmlBody to store plain text only
+	return buildMessageWithBCC(from, to, cc, bcc, subject, markdownBody, "", attachments)
 }
 
 // inlineImage holds a local image path and its assigned Content-ID.
@@ -331,8 +330,62 @@ func buildMessageWithBCC(from, to, cc, bcc, subject, plainText, htmlBody string,
 
 	hasFiles := len(attachments) > 0
 	hasImages := len(inlines) > 0
+	hasHTML := htmlBody != ""
 
 	switch {
+	case !hasHTML && !hasFiles:
+		// Plain text only (drafts): simple text/plain message
+		hdr("From", from)
+		hdr("To", to)
+		if cc != "" {
+			hdr("Cc", cc)
+		}
+		if bcc != "" {
+			hdr("Bcc", bcc)
+		}
+		hdr("Subject", mime.QEncoding.Encode("utf-8", subject))
+		hdr("Date", time.Now().Format(time.RFC1123Z))
+		hdr("Message-ID", "<"+msgID+"@neomd>")
+		hdr("MIME-Version", "1.0")
+		hdr("Content-Type", "text/plain; charset=utf-8")
+		hdr("Content-Transfer-Encoding", "quoted-printable")
+		hdr("X-Mailer", "neomd")
+		b.WriteString("\r\n")
+		writeQP(&b, plainText)
+
+	case !hasHTML && hasFiles:
+		// Plain text + attachments (drafts with files): multipart/mixed
+		mixedBoundary, err := randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+		hdr("From", from)
+		hdr("To", to)
+		if cc != "" {
+			hdr("Cc", cc)
+		}
+		if bcc != "" {
+			hdr("Bcc", bcc)
+		}
+		hdr("Subject", mime.QEncoding.Encode("utf-8", subject))
+		hdr("Date", time.Now().Format(time.RFC1123Z))
+		hdr("Message-ID", "<"+msgID+"@neomd>")
+		hdr("MIME-Version", "1.0")
+		hdr("Content-Type", `multipart/mixed; boundary="`+mixedBoundary+`"`)
+		hdr("X-Mailer", "neomd")
+		b.WriteString("\r\n")
+		fmt.Fprintf(&b, "--%s\r\n", mixedBoundary)
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+		writeQP(&b, plainText)
+		b.WriteString("\r\n")
+		for _, path := range attachments {
+			if err := writeAttachment(&b, mixedBoundary, path); err != nil {
+				return nil, fmt.Errorf("attachment %s: %w", path, err)
+			}
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", mixedBoundary)
+
 	case !hasImages && !hasFiles:
 		// Simple: multipart/alternative only
 		writeHeaders(`multipart/alternative; boundary="` + altBoundary + `"`)

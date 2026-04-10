@@ -386,6 +386,118 @@ func TestExtractAddr(t *testing.T) {
 	}
 }
 
+func TestBuildDraftMessage_PlainTextOnly(t *testing.T) {
+	// Test that drafts are stored as plain text only, no HTML conversion.
+	// This ensures markdown formatting survives the save/load cycle.
+	markdownBody := `thello there
+
+--
+**Simon Späti**
+Data Engineer & Technical Author, SSP Data GmbH
+
+Connect: [LinkedIn](https://li.ssp.sh/) | [Bluesky](https://bs.ssp.sh/) | [GitHub](https://gh.ssp.sh/)
+Explore: [Website](https://ssp.sh/) | [Vault](https://vault.ssp.sh/) | [Book](https://dedp.online/) | [Services](https://ssp.sh/services)
+
+*sent from [neomd](https://neomd.ssp.sh)*`
+
+	raw, err := BuildDraftMessage(
+		"Simon Späti <simu@sspaeti.com>",
+		"sspaeti@hey.com",
+		"",
+		"sspaeti@hey.com",
+		"test 5555",
+		markdownBody,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("BuildDraftMessage: %v", err)
+	}
+
+	msg, mediaType, _ := parseMIME(t, raw)
+
+	// Verify it's plain text, NOT multipart/alternative
+	if mediaType != "text/plain" {
+		t.Errorf("expected text/plain for draft, got %s", mediaType)
+	}
+
+	// Verify BCC header is present (drafts keep BCC)
+	bcc := msg.Header.Get("Bcc")
+	if bcc != "sspaeti@hey.com" {
+		t.Errorf("Bcc header: got %q, want %q", bcc, "sspaeti@hey.com")
+	}
+
+	// Read the body and verify it matches exactly (no HTML conversion artifacts)
+	body, err := io.ReadAll(msg.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	bodyStr := string(body)
+	// The body is quoted-printable encoded, but for ASCII text it should be mostly readable.
+	// Check for key markers that would be munged by HTML conversion:
+	if !strings.Contains(bodyStr, "**Simon Sp") { // ** should be preserved, not converted to <strong>
+		t.Error("markdown bold syntax (**) not preserved in draft body")
+	}
+	if !strings.Contains(bodyStr, "[LinkedIn]") { // markdown links should be preserved
+		t.Error("markdown link syntax [] not preserved in draft body")
+	}
+	if !strings.Contains(bodyStr, "*sent from") { // * for italics should be preserved
+		t.Error("markdown italic syntax (*) not preserved in draft body")
+	}
+	if strings.Contains(bodyStr, "<p>") || strings.Contains(bodyStr, "<strong>") {
+		t.Error("draft body contains HTML tags - should be plain text only")
+	}
+}
+
+func TestBuildDraftMessage_WithAttachment(t *testing.T) {
+	dir := t.TempDir()
+	attPath := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(attPath, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := BuildDraftMessage(
+		"Alice <alice@example.com>",
+		"Bob <bob@example.com>",
+		"",
+		"",
+		"Draft with attachment",
+		"body text",
+		[]string{attPath},
+	)
+	if err != nil {
+		t.Fatalf("BuildDraftMessage: %v", err)
+	}
+
+	_, mediaType, params := parseMIME(t, raw)
+	if mediaType != "multipart/mixed" {
+		t.Fatalf("expected multipart/mixed for draft with attachment, got %s", mediaType)
+	}
+
+	msg, _ := mail.ReadMessage(bytes.NewReader(raw))
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+
+	// First part should be plain text (not multipart/alternative)
+	part0, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("NextPart 0: %v", err)
+	}
+	ct0, _, _ := mime.ParseMediaType(part0.Header.Get("Content-Type"))
+	if ct0 != "text/plain" {
+		t.Errorf("first part: expected text/plain, got %s", ct0)
+	}
+
+	// Second part should be the attachment
+	part1, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("NextPart 1: %v", err)
+	}
+	ct1, _, _ := mime.ParseMediaType(part1.Header.Get("Content-Type"))
+	if ct1 != "text/plain" {
+		t.Errorf("attachment content-type: expected text/plain, got %s", ct1)
+	}
+}
+
 func TestInferSMTPUseTLS(t *testing.T) {
 	tests := []struct {
 		name         string
