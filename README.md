@@ -122,8 +122,10 @@ yay -S neomd-bin
 
 On first run, neomd:
 1. Creates `~/.config/neomd/config.toml` with placeholders — fill in your IMAP/SMTP credentials
+    - Important: Make sure that the Capitalization and naming of folder in `config.toml` is accroding to webmail IMAP, e.g. [Gmails](docs/gmail.md) uses `sent = "[Gmail]/Sent Mail"` and not `sent` etc. 
 2. Creates `~/.config/neomd/lists/` for screener allowlists (or uses your custom paths from config)
 3. Creates any missing IMAP folders (ToScreen, Feed, PaperTrail, etc.) automatically
+
 
 Neomd also runs on Android (more for fun) — see [docs/android.md](docs/android.md).
 

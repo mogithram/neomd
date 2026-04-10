@@ -3546,7 +3546,7 @@ func (m Model) viewWelcome() string {
 		"Your screener lists are empty, so " + warn.Render("auto-screening") + "\n" +
 		warn.Render("is paused") + " until you classify your first senders.\n\n" +
 		title.Render("Getting started") + "\n" +
-		"1. Go to " + key.Render("ToScreen") + " tab (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
+		"1. Go to " + key.Render("Inbox") + " (once screener active, it will be " + key.Render("ToScreen") + "tab (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
 		"2. Screen each sender:\n" +
 		key.Render("   I") + "  screen " + title.Render("in") + "   " + dim.Render("sender stays in Inbox forever") + "\n" +
 		key.Render("   O") + "  screen " + title.Render("out") + "  " + dim.Render("sender never reaches Inbox again") + "\n" +
