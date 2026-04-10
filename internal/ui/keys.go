@@ -12,6 +12,7 @@ type HelpSection struct {
 var HelpSections = []HelpSection{
 	{"Navigation", [][2]string{
 		{"j / k", "move down / up"},
+		{"d / u", "page down / up in inbox/help"},
 		{"gg", "jump to top"},
 		{"G", "jump to bottom"},
 		{"enter / l", "open email"},
@@ -30,6 +31,7 @@ var HelpSections = []HelpSection{
 		{"gk", "go to ToScreen"},
 		{"go", "go to ScreenedOut"},
 		{"gw", "go to Waiting"},
+		{"gb", "go to Work (if configured)"},
 		{"gm", "go to Someday"},
 		{"gd", "go to Drafts"},
 		{"ge", "go to Everything — latest 50 emails across all folders"},
@@ -53,6 +55,7 @@ var HelpSections = []HelpSection{
 		{"Mt", "move to Trash"},
 		{"Mo", "move to ScreenedOut"},
 		{"Mw", "move to Waiting"},
+		{"Mb", "move to Work (if configured)"},
 		{"Mm", "move to Someday"},
 		{"Mk", "move to ToScreen"},
 	}},

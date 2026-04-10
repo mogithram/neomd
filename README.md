@@ -101,6 +101,12 @@ Or in Gmail:
 
 **Prerequisites:** [Go 1.22+](https://go.dev/doc/install) and `make`.
 
+> [!NOTE]
+> **Optional attachment helpers:**
+> - `yazi` enables the built-in file picker used by pre-send `a`
+> - custom Neovim integration in `custom.lua` enables inline `<leader>a` attachment insertion inside `neomd-*.md` buffers
+> - without these, neomd still works; the inline Neovim attachment workflow just won't be available
+
 ```sh
 git clone https://github.com/ssp-data/neomd
 cd neomd
@@ -122,8 +128,10 @@ yay -S neomd-bin
 
 On first run, neomd:
 1. Creates `~/.config/neomd/config.toml` with placeholders — fill in your IMAP/SMTP credentials
+    - Important: Make sure that the Capitalization and naming of folder in `config.toml` is accroding to webmail IMAP, e.g. [Gmails](docs/gmail.md) uses `sent = "[Gmail]/Sent Mail"` and not `sent` etc. 
 2. Creates `~/.config/neomd/lists/` for screener allowlists (or uses your custom paths from config)
 3. Creates any missing IMAP folders (ToScreen, Feed, PaperTrail, etc.) automatically
+
 
 Neomd also runs on Android (more for fun) — see [docs/android.md](docs/android.md).
 
@@ -160,6 +168,8 @@ For the full configuration reference including multiple accounts, OAuth2 authent
 
 On first launch, **auto-screening is paused** because your screener lists are empty — neomd won't move anything until you've classified your first sender. Your Inbox loads normally so you can explore.
 
+By default, neomd loads and auto-screens only the newest `200` Inbox emails (`[ui].inbox_count`). This keeps startup predictable. If you want to re-screen the entire Inbox on the IMAP server, run `:screen-all` inside neomd; that scans every Inbox email, not just the loaded subset, and can take a while on large mailboxes.
+
 **Getting started with the screener:**
 
 1. From your Inbox, pick an email and press `I` (screen **in**) to approve the sender, or `O` (screen **out**) to block them. This creates your first screener list entry.
@@ -169,7 +179,7 @@ On first launch, **auto-screening is paused** because your screener lists are em
    - `O` screen **out** — sender never reaches Inbox again
    - `F` **feed** — newsletters go to the Feed tab
    - `P` **papertrail** — receipts go to the PaperTrail tab
-4. Use `m` to mark multiple emails, then `I` to batch-approve them all at once.
+4. Use `m` to mark multiple emails, then `I` to batch-approve them all at once. From the `ToScreen` folder, approving/blocking a single unmarked message now applies to all currently queued mail from that sender.
 
 **The best part:** all classifications are saved permanently in your screener lists (`screened_in.txt`, `screened_out.txt`, etc.). An email address screened in will automatically go to your Inbox, and any email screened out will never be in your Inbox again.
 
@@ -177,6 +187,9 @@ You choose who can land in your Inbox. Bye-bye spam. This is the beauty of [HEY-
 
 > [!TIP]
 > To disable auto-screening entirely, set `auto_screen_on_load = false` in `[ui]` config. Run `:debug` inside neomd if something isn't working.
+
+> [!WARNING]
+> `:screen-all` operates on the full Inbox mailbox on the server, not just the emails currently loaded in the UI. Use it when you intentionally want a mailbox-wide reclassification pass.
 
 ### Screener Workflow
 
@@ -190,6 +203,8 @@ See the [full keybindings reference](docs/keybindings.md) (auto-generated from [
 ### How Sending Works
 
 Compose in Markdown, send as `multipart/alternative` (plain text + HTML). Attachments, CC/BCC, multiple From addresses, drafts, and pre-send review are all supported.
+
+Discarding unsent mail now asks for confirmation in compose/pre-send, and `:recover` reopens the latest backup if you want to resume after an abort.
 
 - See [docs/sending.md](docs/sending.md) for details on MIME structure, attachments, pre-send review, and drafts. 
 - See [docs/reading.md](docs/reading.md) for the reader: images, inline links, attachments, and navigation.

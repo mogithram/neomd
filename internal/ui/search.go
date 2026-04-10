@@ -101,11 +101,6 @@ func (m *Model) handleIMAPSearchResult(msg imapSearchResultMsg) (tea.Model, tea.
 	}
 	m.imapSearchResults = true
 	m.offTabFolder = "Search"
-	// Prepend folder name to subject so user can see where each result is from
-	for i := range msg.emails {
-		folder := msg.emails[i].Folder
-		msg.emails[i].Subject = "[" + folder + "] " + msg.emails[i].Subject
-	}
 	m.emails = msg.emails
 	m.markedUIDs = make(map[uint32]bool)
 	m.filterActive = false
@@ -141,6 +136,7 @@ func (m Model) fetchEverythingCmd() tea.Cmd {
 // handleEverythingResult displays the "Everything" view.
 func (m *Model) handleEverythingResult(msg everythingResultMsg) (tea.Model, tea.Cmd) {
 	m.loading = false
+	m.imapSearchText = ""
 	if msg.err != nil {
 		m.status = "Everything: " + msg.err.Error()
 		m.isError = true
@@ -151,10 +147,6 @@ func (m *Model) handleEverythingResult(msg everythingResultMsg) (tea.Model, tea.
 		return m, nil
 	}
 	m.offTabFolder = "Everything"
-	// Prepend folder name so user knows where each email is
-	for i := range msg.emails {
-		msg.emails[i].Subject = "[" + msg.emails[i].Folder + "] " + msg.emails[i].Subject
-	}
 	m.emails = msg.emails
 	m.markedUIDs = make(map[uint32]bool)
 	m.filterActive = false
@@ -214,6 +206,7 @@ func (m Model) fetchConversationCmd(e *imap.Email) tea.Cmd {
 // handleConversationResult displays the conversation/thread view.
 func (m *Model) handleConversationResult(msg conversationResultMsg) (tea.Model, tea.Cmd) {
 	m.loading = false
+	m.imapSearchResults = false
 	if msg.err != nil {
 		m.status = "Thread: " + msg.err.Error()
 		m.isError = true
@@ -224,9 +217,6 @@ func (m *Model) handleConversationResult(msg conversationResultMsg) (tea.Model, 
 		return m, nil
 	}
 	m.offTabFolder = "Thread"
-	for i := range msg.emails {
-		msg.emails[i].Subject = "[" + msg.emails[i].Folder + "] " + msg.emails[i].Subject
-	}
 	m.emails = msg.emails
 	m.markedUIDs = make(map[uint32]bool)
 	m.filterActive = false

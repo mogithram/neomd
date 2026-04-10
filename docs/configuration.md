@@ -64,7 +64,7 @@ spam         = "spam" #check capitalization of your pre-existing Spam folder, so
 
 [ui]
 theme                = "dark"   # dark | light | auto
-inbox_count          = 50
+inbox_count          = 200      # how many newest emails neomd loads per folder/reload
 auto_screen_on_load  = true     # screen inbox automatically on every load (default true)
 bg_sync_interval     = 5        # background sync interval in minutes; 0 = disabled (default 5)
 bulk_progress_threshold = 10    # show progress counter for batch operations larger than this (default 10)
@@ -82,6 +82,8 @@ Connect: [LinkedIn](https://example.com/)
 > **Gmail** uses different IMAP folder names (`[Gmail]/Sent Mail`, `[Gmail]/Trash`, etc.). See [Gmail Configuration](gmail.md) for the correct mapping.
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password.
+
+`inbox_count` is a fetch cap for normal folder loads and startup auto-screening. If you want to re-screen the entire Inbox on the IMAP server, use `:screen-all` from inside neomd; that scans every Inbox email, not just the loaded subset, and can take a while on large mailboxes.
 
 ### Environment Variables
 

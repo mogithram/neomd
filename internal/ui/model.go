@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -122,9 +123,9 @@ type (
 		err  error
 	}
 	editorDoneMsg struct {
-		to, cc, bcc, subject, body string
-		err                        error
-		aborted                    bool // true when file was unchanged (ZQ / :q!)
+		to, cc, bcc, from, subject, body string
+		err                              error
+		aborted                          bool // true when file was unchanged (ZQ / :q!)
 	}
 )
 
@@ -167,6 +168,24 @@ func neomdTempDir() string {
 	dir := filepath.Join(os.TempDir(), "neomd")
 	os.MkdirAll(dir, 0700) //nolint
 	return dir
+}
+
+func detectStartupNotice() string {
+	_, hasYazi := exec.LookPath("yazi")
+	home, _ := os.UserHomeDir()
+	customLua := filepath.Join(home, ".config", "nvim", "lua", "sspaeti", "custom.lua")
+	_, customLuaErr := os.Stat(customLua)
+
+	switch {
+	case hasYazi != nil && customLuaErr != nil:
+		return "Optional inline <leader>a attachments in nvim are unavailable: install yazi and add the custom.lua integration. Pre-send 'a' still works."
+	case hasYazi != nil:
+		return "Optional inline <leader>a attachments in nvim are unavailable: install yazi. Pre-send 'a' still works."
+	case customLuaErr != nil:
+		return "Optional inline <leader>a attachments in nvim are not configured. Add the custom.lua integration if you want that workflow; pre-send 'a' still works."
+	default:
+		return ""
+	}
 }
 
 // backupFile holds a backup's full path and modification time.
@@ -373,8 +392,9 @@ type pendingSendData struct {
 	to, cc, bcc, subject, body string
 	// replyToUID/replyToFolder track the original email when this is a reply,
 	// so we can set \Answered after sending. Zero means not a reply.
-	replyToUID    uint32
-	replyToFolder string
+	replyToUID     uint32
+	replyToFolder  string
+	replyToAccount string
 }
 
 // undoMove records one IMAP move so it can be reversed with u.
@@ -433,8 +453,9 @@ type Model struct {
 	presendFromI int // index into presendFroms() for the From field cycle
 
 	// Status / error
-	status  string
-	isError bool
+	status        string
+	isError       bool
+	startupNotice string
 
 	// Auto-screen dry-run: populated by S, cleared by y/n
 	pendingMoves []autoScreenMove
@@ -457,8 +478,10 @@ type Model struct {
 	// prevState is the state to return to when closing the help overlay
 	prevState viewState
 
-	// helpSearch is the live filter string typed in the help overlay
-	helpSearch string
+	// helpSearch / helpScroll track the ? overlay state.
+	helpSearch       string
+	helpSearchActive bool
+	helpScroll       int
 
 	// cmdMode / cmdText / cmdTabI implement vim-style ":" command line.
 	cmdMode    bool
@@ -484,6 +507,9 @@ type Model struct {
 
 	// pendingDeleteAll holds UIDs + folder awaiting y/n before permanent deletion.
 	pendingDeleteAll *deleteAllReadyMsg
+
+	// pendingDiscard asks for y/n confirmation before dropping unsent compose state.
+	pendingDiscard bool
 
 	// folderCounts holds unseen message counts for watched folder tabs.
 	// Keys are tab labels: "Inbox", "PaperTrail", "Waiting", "Scheduled".
@@ -515,11 +541,12 @@ func New(cfg *config.Config, clients []*imap.Client, sc *screener.Screener) Mode
 		cmdHistory: loadCmdHistory(config.HistoryPath()),
 		cmdHistI:   -1,
 		// Note: Spam is intentionally excluded from tabs — use :go-spam to visit.
-		compose:     compose,
-		spinner:     sp,
-		markedUIDs:  make(map[uint32]bool),
-		sortField:   "date",
-		sortReverse: true, // newest first
+		compose:       compose,
+		spinner:       sp,
+		markedUIDs:    make(map[uint32]bool),
+		startupNotice: detectStartupNotice(),
+		sortField:     "date",
+		sortReverse:   true, // newest first
 	}
 }
 
@@ -588,6 +615,25 @@ func (m Model) presendSMTPAccount() config.AccountConfig {
 	return m.activeAccount()
 }
 
+func (m Model) imapCliForAccount(accountName string) *imap.Client {
+	for i, a := range m.accounts {
+		if strings.EqualFold(a.Name, accountName) && i < len(m.clients) {
+			return m.clients[i]
+		}
+	}
+	return m.imapCli()
+}
+
+func (m Model) presendIMAPClient() *imap.Client {
+	return m.imapCliForAccount(m.presendSMTPAccount().Name)
+}
+
+func (m *Model) applyEditedFrom(from string) {
+	if idx := m.matchFromAddress(from); idx >= 0 {
+		m.presendFromI = idx
+	}
+}
+
 // imapCli returns the IMAP client for the active account.
 func (m Model) imapCli() *imap.Client {
 	if m.accountI < len(m.clients) {
@@ -610,6 +656,12 @@ func (m Model) Init() tea.Cmd {
 
 // activeFolder maps the active tab label to an IMAP mailbox name.
 func (m Model) activeFolder() string {
+	switch m.offTabFolder {
+	case "Drafts":
+		return m.cfg.Folders.Drafts
+	case "Spam":
+		return m.cfg.Folders.Spam
+	}
 	switch m.folders[m.activeFolderI] {
 	case "ToScreen":
 		return m.cfg.Folders.ToScreen
@@ -662,7 +714,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder string) tea.Cmd {
+func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, replyToUID uint32, replyToFolder, replyToAccount string) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -673,8 +725,9 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 		STARTTLS:    smtpAcct.STARTTLS,
 		TokenSource: m.tokenSourceFor(smtpAcct.Name),
 	}
-	cli := m.imapCli()
+	cli := m.imapCliForAccount(smtpAcct.Name)
 	sentFolder := m.cfg.Folders.Sent
+	replyCli := m.imapCliForAccount(replyToAccount)
 	return func() tea.Msg {
 		// Build raw MIME once — reused for both SMTP delivery and Sent copy.
 		// BCC is intentionally excluded from headers but included in RCPT TO.
@@ -692,7 +745,7 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 		}
 		// Mark original email as \Answered (non-fatal).
 		if replyToUID > 0 && replyToFolder != "" {
-			_ = cli.MarkAnswered(nil, replyToFolder, replyToUID)
+			_ = replyCli.MarkAnswered(nil, replyToFolder, replyToUID)
 		}
 		return sendDoneMsg{replyToUID: replyToUID, replyToFolder: replyToFolder}
 	}
@@ -754,6 +807,91 @@ func (m Model) targetEmails() []imap.Email {
 		return []imap.Email{*e}
 	}
 	return nil
+}
+
+func normalizedSender(from string) string {
+	return strings.ToLower(extractEmailAddr(from))
+}
+
+func writeAttachmentsTemp(files []imap.Attachment) ([]string, error) {
+	paths := make([]string, 0, len(files))
+	for _, a := range files {
+		base := filepath.Base(a.Filename)
+		if base == "." || base == string(filepath.Separator) || base == "" {
+			base = "attachment"
+		}
+		f, err := os.CreateTemp(neomdTempDir(), "draft-"+base+"-*")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := f.Write(a.Data); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return nil, err
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			return nil, err
+		}
+		paths = append(paths, f.Name())
+	}
+	return paths, nil
+}
+
+func (m Model) validateScreenerSafety() error {
+	dests := map[string]string{
+		"ToScreen":    m.cfg.Folders.ToScreen,
+		"ScreenedOut": m.cfg.Folders.ScreenedOut,
+		"Feed":        m.cfg.Folders.Feed,
+		"PaperTrail":  m.cfg.Folders.PaperTrail,
+		"Spam":        m.cfg.Folders.Spam,
+	}
+	for name, folder := range dests {
+		if folder != "" && folder == m.cfg.Folders.Trash {
+			return fmt.Errorf("unsafe folder config: %s points to Trash (%s); refusing to screen until config is fixed", name, folder)
+		}
+	}
+	return nil
+}
+
+func (m Model) inboxPageStep() int {
+	if m.height <= 8 {
+		return 10
+	}
+	return m.height - 6
+}
+
+func (m Model) hasComposeDraft() bool {
+	if m.pendingSend != nil {
+		if strings.TrimSpace(m.pendingSend.to) != "" ||
+			strings.TrimSpace(m.pendingSend.cc) != "" ||
+			strings.TrimSpace(m.pendingSend.bcc) != "" ||
+			strings.TrimSpace(m.pendingSend.subject) != "" ||
+			strings.TrimSpace(m.pendingSend.body) != "" {
+			return true
+		}
+	}
+	if strings.TrimSpace(m.compose.to.Value()) != "" ||
+		strings.TrimSpace(m.compose.cc.Value()) != "" ||
+		strings.TrimSpace(m.compose.bcc.Value()) != "" ||
+		strings.TrimSpace(m.compose.subject.Value()) != "" {
+		return true
+	}
+	return len(m.attachments) > 0
+}
+
+func (m *Model) beginDiscardConfirm() {
+	m.pendingDiscard = true
+	m.status = "Discard unsent message?  · y discard, n keep editing"
+	m.isError = true
+}
+
+func (m *Model) cancelDiscardConfirm() {
+	m.pendingDiscard = false
+	if m.status == "Discard unsent message?  · y discard, n keep editing" {
+		m.status = ""
+		m.isError = false
+	}
 }
 
 // batchMoveCmd moves a slice of emails to dst, emitting batchDoneMsg.
@@ -825,13 +963,54 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 	}
 	bp := m.bulkProgress
 	return func() tea.Msg {
-		for i, o := range ops {
-			// Move first, classify after — if move fails, screener file stays unchanged.
-			if o.dst != "" && o.dst != o.srcFolder {
-				if _, err := m.imapCli().MoveMessage(nil, o.srcFolder, o.uid, o.dst); err != nil {
-					return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(ops), err)}
+		if err := m.validateScreenerSafety(); err != nil {
+			return batchDoneMsg{err: err}
+		}
+		expandedOps := ops
+		if len(emails) == 1 && len(m.markedUIDs) == 0 && emails[0].Folder == cfg.Folders.ToScreen {
+			sender := normalizedSender(emails[0].From)
+			uids, err := m.imapCli().SearchUIDs(nil, cfg.Folders.ToScreen)
+			if err != nil {
+				return batchDoneMsg{err: err}
+			}
+			expandedOps = nil
+			for start := 0; start < len(uids); start += 200 {
+				end := start + 200
+				if end > len(uids) {
+					end = len(uids)
+				}
+				batch, err := m.imapCli().FetchHeadersByUID(nil, cfg.Folders.ToScreen, uids[start:end])
+				if err != nil {
+					return batchDoneMsg{err: err}
+				}
+				for _, e := range batch {
+					if normalizedSender(e.From) == sender {
+						var dst string
+						switch action {
+						case "I":
+							dst = cfg.Folders.Inbox
+						case "O":
+							dst = cfg.Folders.ScreenedOut
+						case "F":
+							dst = cfg.Folders.Feed
+						case "P":
+							dst = cfg.Folders.PaperTrail
+						case "$":
+							dst = cfg.Folders.Spam
+						}
+						expandedOps = append(expandedOps, op{e.From, e.Folder, e.UID, dst})
+					}
 				}
 			}
+		}
+		snapshot := sc.Snapshot()
+		seenSenders := make(map[string]bool)
+		for _, o := range expandedOps {
+			sender := normalizedSender(o.from)
+			if seenSenders[sender] {
+				continue
+			}
+			seenSenders[sender] = true
 			var err error
 			switch action {
 			case "I":
@@ -846,7 +1025,31 @@ func (m Model) batchScreenerCmd(emails []imap.Email, action string) tea.Cmd {
 				err = sc.MarkSpam(o.from)
 			}
 			if err != nil {
-				return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(ops), err)}
+				_ = sc.Restore(snapshot)
+				return batchDoneMsg{err: err}
+			}
+		}
+		var undos []undoMove
+		for i, o := range expandedOps {
+			if o.dst != "" && o.dst != o.srcFolder {
+				destUID, err := m.imapCli().MoveMessage(nil, o.srcFolder, o.uid, o.dst)
+				if err != nil {
+					var rollbackErrs []string
+					for j := len(undos) - 1; j >= 0; j-- {
+						u := undos[j]
+						if _, undoErr := m.imapCli().MoveMessage(nil, u.toFolder, u.uid, u.fromFolder); undoErr != nil {
+							rollbackErrs = append(rollbackErrs, fmt.Sprintf("%s:%d→%s (%v)", u.toFolder, u.uid, u.fromFolder, undoErr))
+						}
+					}
+					if restoreErr := sc.Restore(snapshot); restoreErr != nil {
+						rollbackErrs = append(rollbackErrs, "screener restore: "+restoreErr.Error())
+					}
+					if len(rollbackErrs) > 0 {
+						return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w (rollback failed: %s)", i, len(expandedOps), err, strings.Join(rollbackErrs, "; "))}
+					}
+					return batchDoneMsg{err: fmt.Errorf("stopped after %d/%d: %w", i, len(expandedOps), err)}
+				}
+				undos = append(undos, undoMove{uid: destUID, fromFolder: o.srcFolder, toFolder: o.dst})
 			}
 			if bp != nil {
 				bp.moved.Add(1)
@@ -912,6 +1115,9 @@ func (m Model) batchToggleSeenCmd(emails []imap.Email) tea.Cmd {
 // lookups) and returns planned moves. emails must live at least as long as the
 // returned moves (pointers into the slice are stored).
 func (m Model) classifyForScreen(emails []imap.Email) []autoScreenMove {
+	if m.validateScreenerSafety() != nil {
+		return nil
+	}
 	inboxFolder := m.cfg.Folders.Inbox
 	var moves []autoScreenMove
 	for i := range emails {
@@ -1179,6 +1385,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.activeFolderI = z.folderIndex
 					m.offTabFolder = ""
+					m.imapSearchText = ""
 					m.loading = true
 					return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 				}
@@ -1212,6 +1419,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.markedUIDs = make(map[uint32]bool) // clear marks on folder reload
 		m.filterActive = false
 		m.filterText = ""
+		if m.status == "" && m.startupNotice != "" {
+			m.status = m.startupNotice
+			m.startupNotice = ""
+		}
 		sortCmd := m.sortEmails() // applies sort and sets list items
 
 		// First-run welcome: show a brief intro popup.
@@ -1228,6 +1439,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Skip when all screener lists are empty — otherwise every email would
 		// be moved to ToScreen on first run, confusing new users.
 		if msg.folder == m.cfg.Folders.Inbox && m.cfg.UI.AutoScreen() && !m.screener.IsEmpty() {
+			if err := m.validateScreenerSafety(); err != nil {
+				m.status = err.Error()
+				m.isError = true
+				return m, tea.Batch(sortCmd, m.fetchFolderCountsCmd())
+			}
 			if moves := m.previewAutoScreen(); len(moves) > 0 {
 				m.loading = true
 				m.bulkProgress = m.newBulkOp("Screening", len(moves))
@@ -1431,6 +1647,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
 	case deepScreenCountMsg:
+		if err := m.validateScreenerSafety(); err != nil {
+			m.loading = false
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		// Phase 1 done: we know how many emails exist. Show count and kick off phase 2.
 		m.status = fmt.Sprintf("Screen-all: found %d emails — fetching headers in batches…", msg.total)
 		return m, tea.Batch(m.spinner.Tick, m.deepScreenClassifyCmd(nil, msg.uids, msg.total))
@@ -1531,6 +1753,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.bgFetchInboxCmd(), m.scheduleBgSync())
 
 	case bgInboxFetchedMsg:
+		if err := m.validateScreenerSafety(); err != nil {
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		moves := m.classifyForScreen(msg.emails)
 		if len(moves) == 0 {
 			return m, nil
@@ -1557,24 +1784,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editorDoneMsg:
 		if msg.err != nil {
+			m.attachments = nil
 			m.status = msg.err.Error()
 			m.isError = true
 			m.state = stateInbox
 			return m, nil
 		}
 		if msg.aborted {
-			m.status = "Aborted (no changes saved)."
+			m.attachments = nil
+			m.status = "Aborted (no changes saved). Use :recover to reopen the latest backup."
 			m.state = stateInbox
 			return m, nil
 		}
 		if strings.TrimSpace(msg.body) == "" {
-			m.status = "Cancelled (empty body)."
+			m.attachments = nil
+			m.status = "Cancelled (empty body). Use :recover if you want the latest backup."
 			m.state = stateInbox
 			return m, nil
 		}
 		// Strip editor header hints and extract [attach] lines.
 		inlineAttach, cleanBody := extractInlineAttachments(stripPrelude(msg.body))
 		m.attachments = append(m.attachments, inlineAttach...)
+		m.applyEditedFrom(msg.from)
 
 		// Go to pre-send review instead of sending immediately.
 		m.pendingSend = &pendingSendData{
@@ -1585,8 +1816,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.openEmail != nil && strings.HasPrefix(strings.ToLower(msg.subject), "re:") {
 			m.pendingSend.replyToUID = m.openEmail.UID
 			m.pendingSend.replyToFolder = m.openEmail.Folder
+			m.pendingSend.replyToAccount = m.activeAccount().Name
 		}
 		m.state = statePresend
+		m.status = ""
+		m.isError = false
 		return m, nil
 
 	case attachPickDoneMsg:
@@ -1603,6 +1837,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = m.prevState
 			} else {
 				m.prevState = m.state
+				m.helpSearch = ""
+				m.helpSearchActive = false
+				m.helpScroll = 0
 				m.state = stateHelp
 			}
 			return m, nil
@@ -1765,10 +2002,25 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
+		if m.filterText != "" {
+			m.filterActive = false
+			m.filterText = ""
+			return m, m.applyFilter()
+		}
 		if m.imapSearchResults {
 			m.imapSearchResults = false
 			m.imapSearchText = ""
 			m.offTabFolder = ""
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
+		}
+		if m.offTabFolder != "" {
+			m.offTabFolder = ""
+			// If we have a pending search query, restore search results instead of activeFolder
+			if m.imapSearchText != "" {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, m.imapSearchAllCmd(m.imapSearchText))
+			}
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 		}
@@ -1866,6 +2118,11 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.folders[m.activeFolderI] != "Inbox" {
 			break
 		}
+		if err := m.validateScreenerSafety(); err != nil {
+			m.status = err.Error()
+			m.isError = true
+			return m, nil
+		}
 		moves := m.previewAutoScreen()
 		if len(moves) == 0 {
 			m.status = "Nothing to screen — all senders already classified."
@@ -1936,6 +2193,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeFolderI = (m.activeFolderI + 1) % len(m.folders)
 		m.offTabFolder = ""
 		m.imapSearchResults = false
+		m.imapSearchText = ""
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
@@ -1943,11 +2201,30 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeFolderI = (m.activeFolderI - 1 + len(m.folders)) % len(m.folders)
 		m.offTabFolder = ""
 		m.imapSearchResults = false
+		m.imapSearchText = ""
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
 	case "G":
 		m.inbox.Select(len(m.inbox.Items()) - 1)
+		return m, nil
+
+	case "d":
+		next := m.inbox.Index() + m.inboxPageStep()
+		if max := len(m.inbox.Items()) - 1; next > max {
+			next = max
+		}
+		if next >= 0 {
+			m.inbox.Select(next)
+		}
+		return m, nil
+
+	case "u":
+		prev := m.inbox.Index() - m.inboxPageStep()
+		if prev < 0 {
+			prev = 0
+		}
+		m.inbox.Select(prev)
 		return m, nil
 
 	case "/":
@@ -1973,7 +2250,10 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "c":
+		m.attachments = nil
 		m.state = stateCompose
+		m.status = ""
+		m.isError = false
 		m.compose.reset()
 		m.presendFromI = 0
 		return m, nil
@@ -2105,6 +2385,15 @@ func saveCmdHistory(path string, history []string) {
 	_ = os.WriteFile(path, []byte(content), 0600)
 }
 
+func (m Model) shouldPrefixFolderInSubject() bool {
+	switch m.offTabFolder {
+	case "Search", "Everything", "Thread":
+		return true
+	default:
+		return false
+	}
+}
+
 // addCmdHistory prepends input to history (deduplicating) and caps at 5 entries.
 func addCmdHistory(history []string, input string) []string {
 	// Remove existing occurrence of the same command (dedup)
@@ -2128,7 +2417,7 @@ func addCmdHistory(history []string, input string) []string {
 // Call this whenever filterText changes.
 func (m *Model) applyFilter() tea.Cmd {
 	if m.filterText == "" {
-		return setEmails(&m.inbox, m.emails, m.markedUIDs)
+		return setEmails(&m.inbox, m.emails, m.markedUIDs, m.shouldPrefixFolderInSubject())
 	}
 	query := strings.ToLower(m.filterText)
 	var filtered []imap.Email
@@ -2138,7 +2427,7 @@ func (m *Model) applyFilter() tea.Cmd {
 			filtered = append(filtered, e)
 		}
 	}
-	return setEmails(&m.inbox, filtered, m.markedUIDs)
+	return setEmails(&m.inbox, filtered, m.markedUIDs, m.shouldPrefixFolderInSubject())
 }
 
 // handleChord dispatches two-key sequences (g<x>, M<x>, space<x>).
@@ -2176,12 +2465,14 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 		if key == "S" { // gS — go to Spam (not in tab rotation)
 			m.loading = true
 			m.offTabFolder = "Spam"
+			m.imapSearchText = ""
 			m.status = "Spam folder — press R to reload, tab to leave"
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Spam))
 		}
 		if key == "d" { // gd — go to Drafts (not in tab rotation)
 			m.loading = true
 			m.offTabFolder = "Drafts"
+			m.imapSearchText = ""
 			m.status = "Drafts folder — press R to reload, tab to leave"
 			return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.cfg.Folders.Drafts))
 		}
@@ -2210,6 +2501,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 					}
 					m.activeFolderI = i
 					m.offTabFolder = ""
+					m.imapSearchText = ""
 					m.loading = true
 					return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 				}
@@ -2230,9 +2522,12 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"t": m.cfg.Folders.Trash,
 			"o": m.cfg.Folders.ScreenedOut,
 			"w": m.cfg.Folders.Waiting,
-			"b": m.cfg.Folders.Work,
 			"m": m.cfg.Folders.Someday,
 			"k": m.cfg.Folders.ToScreen,
+		}
+		// Only add Work folder if configured
+		if m.cfg.Folders.Work != "" {
+			dstMap["b"] = m.cfg.Folders.Work
 		}
 		if dst, ok := dstMap[key]; ok {
 			m.loading = true
@@ -2406,12 +2701,23 @@ func (m Model) openInBrowser() (tea.Model, tea.Cmd) {
 		if a.ContentID == "" || len(a.Data) == 0 {
 			continue
 		}
-		imgPath := filepath.Join(neomdTempDir(), "cid-"+a.ContentID+"-"+a.Filename)
+		// Sanitize ContentID and Filename to prevent path traversal attacks
+		safeCID := strings.ReplaceAll(a.ContentID, string(os.PathSeparator), "_")
+		safeCID = strings.ReplaceAll(safeCID, "..", "_")
+		safeName := filepath.Base(a.Filename)
+
+		imgPath := filepath.Join(neomdTempDir(), "cid-"+safeCID+"-"+safeName)
+
+		// Verify the path is still under neomdTempDir()
+		if !strings.HasPrefix(imgPath, neomdTempDir()) {
+			continue
+		}
+
 		if err := os.WriteFile(imgPath, a.Data, 0600); err != nil {
 			continue
 		}
 		tmpImages = append(tmpImages, imgPath)
-		// Replace cid:XYZ with file:///path (case-insensitive)
+		// Replace cid:XYZ with file:///path (case-sensitive match)
 		htmlBody = strings.ReplaceAll(htmlBody, "cid:"+a.ContentID, "file://"+imgPath)
 	}
 
@@ -2612,22 +2918,40 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 	e := m.openEmail
 	to := e.To
 	cc := e.CC
+	bcc := e.BCC
+	from := e.From
 	subject := e.Subject
 
 	// Pre-fill compose fields so viewCompose shows them
 	m.compose.reset()
-	m.presendFromI = 0
+	if idx := m.matchFromAddress(from); idx >= 0 {
+		m.presendFromI = idx
+	} else {
+		m.presendFromI = 0
+	}
 	m.compose.to.SetValue(to)
 	m.compose.cc.SetValue(cc)
+	m.compose.bcc.SetValue(bcc)
 	m.compose.subject.SetValue(subject)
-	if cc != "" {
+	if cc != "" || bcc != "" {
 		m.compose.extraVisible = true
 	}
 	m.compose.step = 3 // jump past header steps to subject-done state
+	if len(m.openAttachments) > 0 {
+		paths, err := writeAttachmentsTemp(m.openAttachments)
+		if err != nil {
+			m.status = "continueDraft attachments: " + err.Error()
+			m.isError = true
+			return m, nil
+		}
+		m.attachments = paths
+	} else {
+		m.attachments = nil
+	}
 
 	// Build temp file with prelude + existing body.
 	// No signature — the draft body already contains it from the first compose.
-	prelude := editor.Prelude(to, cc, subject, "")
+	prelude := editor.Prelude(to, cc, bcc, m.presendFrom(), subject, "")
 	body := m.openBody
 
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
@@ -2647,6 +2971,8 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 	cmd := exec.Command(editorBin, tmpPath)
 	draftBackups := m.cfg.UI.DraftBackups()
 	m.state = stateCompose
+	m.status = ""
+	m.isError = false
 	return m, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
 		backupDraft(tmpPath, draftBackups)
 		defer os.Remove(tmpPath)
@@ -2660,25 +2986,53 @@ func (m Model) continueDraft() (tea.Model, tea.Cmd) {
 		if string(raw) == prelude+body {
 			return editorDoneMsg{aborted: true}
 		}
-		pto, pcc, _, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, pcc, pbcc, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
 		if pto == "" {
 			pto = to
 		}
 		if pcc == "" {
 			pcc = cc
 		}
+		if pbcc == "" {
+			pbcc = bcc
+		}
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			psubject = subject
 		}
-		return editorDoneMsg{to: pto, cc: pcc, bcc: "", subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDiscard {
+		switch msg.String() {
+		case "y":
+			m.pendingDiscard = false
+			m.attachments = nil
+			m.pendingSend = nil
+			m.state = stateInbox
+			m.status = "Discarded. Use :recover to reopen the latest backup if needed."
+			m.isError = false
+			return m, nil
+		case "n", "esc":
+			m.cancelDiscardConfirm()
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
-		m.attachments = nil
+		if m.hasComposeDraft() {
+			m.beginDiscardConfirm()
+			return m, nil
+		}
 		m.state = stateInbox
+		m.status = "Cancelled."
 		return m, nil
 	case "ctrl+t":
 		return m.launchAttachPickerCmd()
@@ -2690,10 +3044,16 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+f":
 		froms := m.presendFroms()
-		if len(froms) > 1 {
-			m.presendFromI = (m.presendFromI + 1) % len(froms)
+		if len(froms) <= 1 {
+			m.status = "Only one From address configured. Add another account or [[senders]] alias to cycle."
+			return m, nil
 		}
+		m.presendFromI = (m.presendFromI + 1) % len(froms)
 		return m, nil
+	}
+	if m.status != "" {
+		m.status = ""
+		m.isError = false
 	}
 
 	var cmd tea.Cmd
@@ -2713,6 +3073,23 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateInbox
 		return m, nil
 	}
+	if m.pendingDiscard {
+		switch msg.String() {
+		case "y":
+			m.pendingDiscard = false
+			m.attachments = nil
+			m.pendingSend = nil
+			m.state = stateInbox
+			m.status = "Discarded. Use :recover to reopen the latest backup if needed."
+			m.isError = false
+			return m, nil
+		case "n", "esc":
+			m.cancelDiscardConfirm()
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "enter":
 		m.loading = true
@@ -2723,12 +3100,14 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		replyUID, replyFolder := ps.replyToUID, ps.replyToFolder
 		m.attachments = nil
 		m.pendingSend = nil
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder))
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, ps.body, attachments, replyUID, replyFolder, ps.replyToAccount))
 	case "ctrl+f":
 		froms := m.presendFroms()
-		if len(froms) > 1 {
-			m.presendFromI = (m.presendFromI + 1) % len(froms)
+		if len(froms) <= 1 {
+			m.status = "Only one From address configured. Add another account or [[senders]] alias to cycle."
+			return m, nil
 		}
+		m.presendFromI = (m.presendFromI + 1) % len(froms)
 		return m, nil
 	case "a":
 		return m.launchAttachPickerCmd()
@@ -2754,7 +3133,7 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.launchSpellCheckCmd(ps)
 	case "d":
 		// Save to Drafts without sending.
-		return m, m.saveDraftCmd(m.presendFrom(), ps.to, ps.cc, ps.subject, ps.body, m.attachments)
+		return m, m.saveDraftCmd(m.presendIMAPClient(), m.presendFrom(), ps.to, ps.cc, ps.bcc, ps.subject, ps.body, m.attachments)
 	case "ctrl+b":
 		// Toggle CC/BCC fields — show input prompts to add/edit them.
 		m.compose.extraVisible = !m.compose.extraVisible
@@ -2768,21 +3147,17 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "x":
-		// Discard the email entirely — clear everything and go back to inbox.
-		m.attachments = nil
-		m.pendingSend = nil
-		m.state = stateInbox
-		m.status = "Discarded."
-		m.isError = false
+		m.beginDiscardConfirm()
 		return m, nil
 	case "p":
 		return m.previewInBrowser()
 	case "esc":
-		m.attachments = nil
-		m.pendingSend = nil
-		m.state = stateInbox
-		m.status = "Cancelled."
+		m.beginDiscardConfirm()
 		return m, nil
+	}
+	if m.status != "" {
+		m.status = ""
+		m.isError = false
 	}
 	return m, nil
 }
@@ -2791,7 +3166,7 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // enabled and the cursor positioned on the first misspelled word.
 // On return, the (possibly corrected) body replaces the pre-send body.
 func (m Model) launchSpellCheckCmd(ps *pendingSendData) (tea.Model, tea.Cmd) {
-	prelude := editor.Prelude(ps.to, ps.cc, ps.subject, "")
+	prelude := editor.Prelude(ps.to, ps.cc, ps.bcc, m.presendFrom(), ps.subject, "")
 	content := prelude + ps.body
 
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
@@ -2822,7 +3197,7 @@ func (m Model) launchSpellCheckCmd(ps *pendingSendData) (tea.Model, tea.Cmd) {
 		if readErr != nil {
 			return editorDoneMsg{err: readErr}
 		}
-		pto, pcc, pbcc, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, pcc, pbcc, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
 		if pto == "" {
 			pto = ps.to
 		}
@@ -2832,10 +3207,13 @@ func (m Model) launchSpellCheckCmd(ps *pendingSendData) (tea.Model, tea.Cmd) {
 		if pbcc == "" {
 			pbcc = ps.bcc
 		}
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			psubject = ps.subject
 		}
-		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
@@ -2886,15 +3264,14 @@ func (m Model) previewInBrowser() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) saveDraftCmd(from, to, cc, subject, body string, attachments []string) tea.Cmd {
-	cli := m.imapCli()
+func (m Model) saveDraftCmd(imapCli *imap.Client, from, to, cc, bcc, subject, body string, attachments []string) tea.Cmd {
 	folder := m.cfg.Folders.Drafts
 	return func() tea.Msg {
-		raw, err := smtp.BuildMessage(from, to, cc, subject, body, attachments)
+		raw, err := smtp.BuildDraftMessage(from, to, cc, bcc, subject, body, attachments)
 		if err != nil {
 			return saveDraftDoneMsg{err: err}
 		}
-		err = cli.SaveDraft(nil, folder, raw)
+		err = imapCli.SaveDraft(nil, folder, raw)
 		return saveDraftDoneMsg{err: err}
 	}
 }
@@ -2904,7 +3281,7 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 	cc := m.compose.cc.Value()
 	bcc := m.compose.bcc.Value()
 	subject := m.compose.subject.Value()
-	prelude := editor.Prelude(to, cc, subject, m.cfg.UI.Signature)
+	prelude := editor.Prelude(to, cc, bcc, m.presendFrom(), subject, m.cfg.UI.Signature)
 
 	// Write temp file
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
@@ -2938,7 +3315,7 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 		if string(raw) == prelude {
 			return editorDoneMsg{aborted: true}
 		}
-		pto, pcc, pbcc, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, pcc, pbcc, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
 		if pto == "" {
 			pto = to
 		}
@@ -2948,10 +3325,13 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 		if pbcc == "" {
 			pbcc = bcc
 		}
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			psubject = subject
 		}
-		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
@@ -2959,7 +3339,7 @@ func (m Model) launchEditorCmd() (tea.Model, tea.Cmd) {
 // the pre-send screen). The prelude is built from the provided headers (no
 // signature — it is already in the body from the first compose).
 func (m Model) launchEditorWithBodyCmd(to, cc, bcc, subject, body string) (tea.Model, tea.Cmd) {
-	prelude := editor.Prelude(to, cc, subject, "")
+	prelude := editor.Prelude(to, cc, bcc, m.presendFrom(), subject, "")
 	content := prelude + body
 
 	f, err := os.CreateTemp(neomdTempDir(), "neomd-*.md")
@@ -2993,7 +3373,7 @@ func (m Model) launchEditorWithBodyCmd(to, cc, bcc, subject, body string) (tea.M
 		if string(raw) == content {
 			return editorDoneMsg{aborted: true}
 		}
-		pto, pcc, pbcc, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, pcc, pbcc, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
 		if pto == "" {
 			pto = to
 		}
@@ -3003,10 +3383,13 @@ func (m Model) launchEditorWithBodyCmd(to, cc, bcc, subject, body string) (tea.M
 		if pbcc == "" {
 			pbcc = bcc
 		}
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			psubject = subject
 		}
-		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: pbcc, from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
@@ -3096,7 +3479,10 @@ func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
 		if string(raw) == prelude {
 			return editorDoneMsg{aborted: true}
 		}
-		pto, _, _, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, _, _, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			if !strings.HasPrefix(strings.ToLower(subject), "fwd:") {
 				psubject = "Fwd: " + subject
@@ -3104,7 +3490,7 @@ func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
 				psubject = subject
 			}
 		}
-		return editorDoneMsg{to: pto, cc: "", bcc: "", subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: "", bcc: "", from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
@@ -3186,17 +3572,20 @@ func (m Model) launchReplyWithCC(extraCC string, replyAll bool) (tea.Model, tea.
 		if string(raw) == prelude {
 			return editorDoneMsg{aborted: true}
 		}
-		pto, pcc, _, psubject, _ := editor.ParseHeaders(string(raw))
+		pto, pcc, _, pfrom, psubject, _ := editor.ParseHeaders(string(raw))
 		if pto == "" {
 			pto = to
 		}
 		if pcc == "" {
 			pcc = cc
 		}
+		if pfrom == "" {
+			pfrom = m.presendFrom()
+		}
 		if psubject == "" {
 			psubject = subject
 		}
-		return editorDoneMsg{to: pto, cc: pcc, bcc: "", subject: psubject, body: string(raw)}
+		return editorDoneMsg{to: pto, cc: pcc, bcc: "", from: pfrom, subject: psubject, body: string(raw)}
 	})
 }
 
@@ -3213,6 +3602,19 @@ func (m Model) matchFromIndex(toField, ccField string) int {
 	}
 	for i, from := range froms {
 		if recipients[strings.ToLower(extractEmailAddr(from))] {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m Model) matchFromAddress(from string) int {
+	target := strings.ToLower(extractEmailAddr(from))
+	if target == "" {
+		return -1
+	}
+	for i, candidate := range m.presendFroms() {
+		if strings.ToLower(extractEmailAddr(candidate)) == target {
 			return i
 		}
 	}
@@ -3388,8 +3790,11 @@ func (m Model) viewPresend() string {
 		}
 		b.WriteString("\n")
 	}
-
-	b.WriteString(styleHelp.Render("  enter send · s spell · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · e edit · d draft · esc cancel · x discard"))
+	if m.status != "" {
+		b.WriteString(statusBar(m.status, m.isError))
+	} else {
+		b.WriteString(styleHelp.Render("  enter send · e edit · p preview · a attach · D remove attach · ctrl+f from · ctrl+b cc/bcc · d draft · esc cancel · x discard"))
+	}
 	return b.String()
 }
 
@@ -3445,6 +3850,9 @@ func (m Model) viewInbox() string {
 		if len(m.accounts) > 1 {
 			help += styleHelp.Render(" · ctrl+a switch account")
 		}
+		if len(m.emails) > 0 {
+			help += styleDate.Render(fmt.Sprintf("  │  %d loaded", len(m.emails)))
+		}
 		b.WriteString(help)
 	}
 	return b.String()
@@ -3483,41 +3891,76 @@ func (m Model) viewCompose() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(composeHelp(int(m.compose.step), len(m.presendFroms()) > 1))
+	if m.status != "" {
+		b.WriteString(statusBar(m.status, m.isError))
+	} else {
+		b.WriteString(composeHelp(int(m.compose.step), len(m.presendFroms()) > 1))
+	}
 	return b.String()
 }
 
 func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.helpSearch != "" {
-			m.helpSearch = "" // first esc clears filter
+		if m.helpSearchActive {
+			if m.helpSearch != "" {
+				m.helpSearch = ""
+				m.helpScroll = 0
+			} else {
+				m.helpSearchActive = false
+			}
+		} else if m.helpSearch != "" {
+			m.helpSearch = ""
+			m.helpScroll = 0
 		} else {
 			m.state = m.prevState
 		}
+	case "enter":
+		if m.helpSearchActive {
+			m.helpSearchActive = false
+		}
 	case "q":
-		if m.helpSearch == "" {
+		if !m.helpSearchActive {
 			m.state = m.prevState
 		} else {
 			m.helpSearch += "q"
 		}
-	case "backspace":
-		if len(m.helpSearch) > 0 {
-			m.helpSearch = m.helpSearch[:len([]rune(m.helpSearch))-1]
+	case "backspace", "ctrl+h":
+		if m.helpSearchActive && len(m.helpSearch) > 0 {
+			runes := []rune(m.helpSearch)
+			m.helpSearch = string(runes[:len(runes)-1])
+			m.helpScroll = 0
 		}
 	case "/":
-		// already in search mode — "/" is just a printable char if search active
-		if m.helpSearch == "" {
-			// start typing to search; "/" itself doesn't appear
-		} else {
+		if m.helpSearchActive {
 			m.helpSearch += "/"
+			m.helpScroll = 0
+		} else {
+			m.helpSearchActive = true
+		}
+	case "j", "down":
+		if !m.helpSearchActive {
+			m.helpScroll++
+		}
+	case "k", "up":
+		if !m.helpSearchActive && m.helpScroll > 0 {
+			m.helpScroll--
+		}
+	case "d", "ctrl+d":
+		if !m.helpSearchActive {
+			m.helpScroll += m.helpPageSize()
+		}
+	case "u", "ctrl+u":
+		if !m.helpSearchActive {
+			m.helpScroll -= m.helpPageSize()
 		}
 	default:
-		// printable single character: append to search
-		if len(msg.String()) == 1 {
+		if m.helpSearchActive && len(msg.String()) == 1 {
 			m.helpSearch += msg.String()
+			m.helpScroll = 0
 		}
 	}
+	m.clampHelpScroll()
 	return m, nil
 }
 
@@ -3540,22 +3983,25 @@ func (m Model) viewWelcome() string {
 		title.Render("Quick start") + "\n" +
 		key.Render("  j/k") + "  navigate    " + key.Render("enter") + "  open email\n" +
 		key.Render("  c") + "    compose      " + key.Render("r") + "      reply\n" +
-		key.Render("  f") + "    forward      " + key.Render("R") + "      reply-all\n" +
+		key.Render("  f") + "    forward      " + key.Render("ctrl+r") + "  reply-all\n" +
 		key.Render("  ]") + " / " + key.Render("[") + "  next/prev tab  " + key.Render("?") + "  all keys\n\n" +
 		title.Render("How the Screener works") + "\n" +
 		"Your screener lists are empty, so " + warn.Render("auto-screening") + "\n" +
 		warn.Render("is paused") + " until you classify your first senders.\n\n" +
 		title.Render("Getting started") + "\n" +
-		"1. Go to " + key.Render("ToScreen") + " tab (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
+		"1. Go to " + key.Render("Inbox") + " tab; once screener is active, use " + key.Render("ToScreen") + " (" + key.Render("gk") + " or " + key.Render("Tab") + " or click)\n" +
 		"2. Screen each sender:\n" +
 		key.Render("   I") + "  screen " + title.Render("in") + "   " + dim.Render("sender stays in Inbox forever") + "\n" +
 		key.Render("   O") + "  screen " + title.Render("out") + "  " + dim.Render("sender never reaches Inbox again") + "\n" +
 		key.Render("   F") + "  feed        " + dim.Render("newsletters go to Feed tab") + "\n" +
 		key.Render("   P") + "  papertrail  " + dim.Render("receipts go to PaperTrail tab") + "\n" +
-		"3. Use " + key.Render("m") + " to mark multiple, then " + key.Render("I") + " to batch-approve\n\n" +
+		"3. Use " + key.Render("m") + " to mark multiple, then " + key.Render("I") + " to batch-approve\n" +
+		"4. Normal loads only screen the newest " + key.Render(strconv.Itoa(m.cfg.UI.InboxCount)) + " Inbox emails\n" +
+		"5. Use " + key.Render(":screen-all") + " for the full Inbox on the server " + dim.Render("(slower; mailbox-wide)") + "\n\n" +
 		dim.Render("Once classified, senders are remembered forever.") + "\n" +
 		dim.Render("New emails auto-sort on every load. You choose") + "\n" +
 		dim.Render("who lands in your inbox. Bye-bye spam.") + "\n\n" +
+		dim.Render("Inline <leader>a attachments in nvim require custom.lua + yazi.") + "\n" +
 		dim.Render("Disable auto-screen: auto_screen_on_load = false") + "\n" +
 		dim.Render("Diagnostics: :debug   All keys: ?") + "\n\n" +
 		dim.Render("Press any key to continue.")
@@ -3594,8 +4040,7 @@ func (m Model) viewHelp() string {
 
 	filter := strings.ToLower(m.helpSearch)
 
-	var b strings.Builder
-	b.WriteString(heading + "\n" + sep + "\n")
+	lines := []string{heading, sep}
 	for _, sec := range HelpSections {
 		var matched [][2]string
 		for _, row := range sec.Rows {
@@ -3606,21 +4051,89 @@ func (m Model) viewHelp() string {
 		if len(matched) == 0 {
 			continue
 		}
-		b.WriteString("\n" + titleStyle.Render("  "+sec.Title) + "\n")
+		lines = append(lines, "", titleStyle.Render("  "+sec.Title))
 		for _, row := range matched {
-			b.WriteString("  " + keyStyle.Render(row[0]) + descStyle.Render(row[1]) + "\n")
+			lines = append(lines, "  "+keyStyle.Render(row[0])+descStyle.Render(row[1]))
 		}
 	}
 
-	// Search bar
 	var searchLine string
-	if filter != "" {
-		searchLine = matchStyle.Render("  /"+m.helpSearch) + styleHelp.Render("  · esc to clear")
+	if m.helpSearchActive {
+		searchLine = matchStyle.Render("  /"+m.helpSearch+"█") + styleHelp.Render("  · enter done · esc clear")
+	} else if filter != "" {
+		searchLine = matchStyle.Render("  /"+m.helpSearch) + styleHelp.Render("  · j/k scroll · / edit filter · esc clear")
 	} else {
-		searchLine = styleHelp.Render("  type to filter · ? or q to close")
+		searchLine = styleHelp.Render("  j/k scroll · d/u page · / filter · ? or q close")
 	}
-	b.WriteString("\n" + searchLine)
+
+	contentHeight := m.height - 1
+	if contentHeight < 1 {
+		contentHeight = len(lines)
+	}
+	start := m.helpScroll
+	if start < 0 {
+		start = 0
+	}
+	maxStart := len(lines) - contentHeight
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if start > maxStart {
+		start = maxStart
+	}
+	end := start + contentHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var b strings.Builder
+	for _, line := range lines[start:end] {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(searchLine)
 	return b.String()
+}
+
+func (m Model) helpPageSize() int {
+	if m.height <= 8 {
+		return 1
+	}
+	return (m.height - 4) / 2
+}
+
+func (m Model) helpContentLineCount() int {
+	filter := strings.ToLower(m.helpSearch)
+	count := 2
+	for _, sec := range HelpSections {
+		matched := 0
+		for _, row := range sec.Rows {
+			if filter == "" || strings.Contains(strings.ToLower(row[0]), filter) || strings.Contains(strings.ToLower(row[1]), filter) {
+				matched++
+			}
+		}
+		if matched == 0 {
+			continue
+		}
+		count += 2 + matched
+	}
+	return count
+}
+
+func (m *Model) clampHelpScroll() {
+	if m.helpScroll < 0 {
+		m.helpScroll = 0
+	}
+	contentHeight := m.height - 1
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	maxScroll := m.helpContentLineCount() - contentHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.helpScroll > maxScroll {
+		m.helpScroll = maxScroll
+	}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
