@@ -3247,11 +3247,26 @@ func (m Model) previewInBrowser() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	htmlBody, err := render.ToHTML(ps.body)
+	// Extract [html-signature] marker the same way as the send path
+	// so the preview matches what recipients will actually receive
+	includeHTMLSig, cleanBody := extractHTMLSignatureMarker(ps.body)
+
+	htmlBody, err := render.ToHTML(cleanBody)
 	if err != nil {
 		m.status = "preview: " + err.Error()
 		m.isError = true
 		return m, nil
+	}
+
+	// Inject HTML signature before </body> tag if enabled (matching send path)
+	if includeHTMLSig {
+		htmlSig := m.cfg.UI.HTMLSignature()
+		if htmlSig != "" {
+			idx := strings.LastIndex(htmlBody, "</body>")
+			if idx >= 0 {
+				htmlBody = htmlBody[:idx] + "\n" + htmlSig + "\n" + htmlBody[idx:]
+			}
+		}
 	}
 
 	// Convert absolute image paths to file:// URLs so the browser can display them.

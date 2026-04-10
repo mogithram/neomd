@@ -29,6 +29,8 @@ oauth2_scopes = ["", ""]
 
 # Multiple accounts supported — add more [[accounts]] blocks
 # Switch between them with `ctrl+a` in the inbox
+
+# Root-level settings
 store_sent_drafts_in_sending_account = false  # default: Sent/Drafts stay in the first IMAP account
 
 # Optional: SMTP-only aliases — cycle with ctrl+f in compose/pre-send

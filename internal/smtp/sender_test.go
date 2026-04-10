@@ -561,6 +561,30 @@ func TestBuildMessage_WithHTMLSignature(t *testing.T) {
 	if !strings.Contains(htmlStr, "table") || !strings.Contains(htmlStr, "John Doe") {
 		t.Errorf("text/html part missing HTML signature, got:\n%s", htmlStr)
 	}
+
+	// CRITICAL: Verify the signature is placed BEFORE </body>, not after </html>
+	// The signature should be inside the HTML document structure
+	bodyCloseIdx := strings.Index(htmlStr, "</body>")
+	htmlCloseIdx := strings.Index(htmlStr, "</html>")
+	signatureIdx := strings.Index(htmlStr, "table")
+
+	if bodyCloseIdx < 0 || htmlCloseIdx < 0 {
+		t.Fatal("HTML document missing </body> or </html> tags")
+	}
+	if signatureIdx < 0 {
+		t.Fatal("HTML signature not found in output")
+	}
+
+	// Signature must come BEFORE </body> (inside the document)
+	if signatureIdx >= bodyCloseIdx {
+		t.Errorf("HTML signature is placed AFTER </body> (position %d >= %d)\nThis creates malformed HTML where the signature is outside the document structure.\nFull HTML:\n%s",
+			signatureIdx, bodyCloseIdx, htmlStr)
+	}
+	// Signature must come BEFORE </html> (obviously)
+	if signatureIdx >= htmlCloseIdx {
+		t.Errorf("HTML signature is placed AFTER </html> (position %d >= %d)\nFull HTML:\n%s",
+			signatureIdx, htmlCloseIdx, htmlStr)
+	}
 }
 
 func TestBuildMessage_WithoutHTMLSignature(t *testing.T) {

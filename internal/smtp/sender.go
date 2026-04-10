@@ -247,15 +247,20 @@ func sendSTARTTLSWithConfig(addr, host string, tlsCfg *tls.Config, auth smtp.Aut
 // BCC must not be passed — it must never appear in message headers.
 // When attachments is non-empty the message is wrapped in multipart/mixed;
 // otherwise the structure is unchanged (multipart/alternative only).
-// htmlSignature, if non-empty, is appended to the text/html part after markdown conversion.
+// htmlSignature, if non-empty, is injected before the closing </body> tag in the HTML part.
 func BuildMessage(from, to, cc, subject, markdownBody string, attachments []string, htmlSignature string) ([]byte, error) {
 	htmlBody, err := render.ToHTML(markdownBody)
 	if err != nil {
 		return nil, fmt.Errorf("markdown to html: %w", err)
 	}
-	// Append HTML signature to the HTML part if provided
+	// Inject HTML signature before </body> tag if provided
 	if htmlSignature != "" {
-		htmlBody = htmlBody + "\n" + htmlSignature
+		// Replace the last occurrence of </body> with signature + </body>
+		// This ensures the signature is inside the HTML document structure
+		idx := strings.LastIndex(htmlBody, "</body>")
+		if idx >= 0 {
+			htmlBody = htmlBody[:idx] + "\n" + htmlSignature + "\n" + htmlBody[idx:]
+		}
 	}
 	return buildMessage(from, to, cc, subject, markdownBody, htmlBody, attachments)
 }
@@ -355,6 +360,7 @@ func buildMessageWithBCC(from, to, cc, bcc, subject, plainText, htmlBody string,
 		hdr("Content-Type", "text/plain; charset=utf-8")
 		hdr("Content-Transfer-Encoding", "quoted-printable")
 		hdr("X-Mailer", "neomd")
+		hdr("X-Neomd-Draft", "true")
 		b.WriteString("\r\n")
 		writeQP(&b, plainText)
 
@@ -378,6 +384,7 @@ func buildMessageWithBCC(from, to, cc, bcc, subject, plainText, htmlBody string,
 		hdr("MIME-Version", "1.0")
 		hdr("Content-Type", `multipart/mixed; boundary="`+mixedBoundary+`"`)
 		hdr("X-Mailer", "neomd")
+		hdr("X-Neomd-Draft", "true")
 		b.WriteString("\r\n")
 		fmt.Fprintf(&b, "--%s\r\n", mixedBoundary)
 		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")

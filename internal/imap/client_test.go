@@ -302,3 +302,87 @@ func TestConnect_RefusesUnencrypted(t *testing.T) {
 		t.Errorf("error = %q, want it to contain 'refusing unencrypted'", err.Error())
 	}
 }
+
+func TestParseBody_DraftRoundTrip(t *testing.T) {
+	// Test that draft content survives multiple save/load cycles without mutation.
+	// This verifies the X-Neomd-Draft header correctly bypasses normalizePlainText.
+
+	// Original markdown with various formatting that would be mutated by normalization
+	originalBody := `Hello there
+
+This is line 1
+This is line 2
+
+**Bold text** and *italic text*
+
+[Link](https://example.com)
+
+Code: ` + "`inline code`" + `
+
+--
+Signature line 1
+Signature line 2`
+
+	// Build a draft MIME message (plain text with X-Neomd-Draft header)
+	draftMIME := "From: Alice <alice@example.com>\r\n" +
+		"To: Bob <bob@example.com>\r\n" +
+		"Subject: Test Draft\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"X-Neomd-Draft: true\r\n" +
+		"\r\n" +
+		originalBody
+
+	// First parse (simulating draft reopen)
+	body1, _, _, _ := parseBody([]byte(draftMIME))
+
+	// Verify the body matches exactly (no trailing spaces added)
+	if body1 != originalBody {
+		t.Errorf("first parse mutated draft content\ngot:\n%q\nwant:\n%q", body1, originalBody)
+	}
+
+	// Second parse (simulating a save/reopen cycle)
+	draftMIME2 := "From: Alice <alice@example.com>\r\n" +
+		"To: Bob <bob@example.com>\r\n" +
+		"Subject: Test Draft\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"X-Neomd-Draft: true\r\n" +
+		"\r\n" +
+		body1 // Use the result from first parse
+
+	body2, _, _, _ := parseBody([]byte(draftMIME2))
+
+	// Verify still matches exactly (no accumulation of trailing spaces)
+	if body2 != originalBody {
+		t.Errorf("second parse mutated draft content\ngot:\n%q\nwant:\n%q", body2, originalBody)
+	}
+
+	// Verify they're all equal
+	if body1 != body2 {
+		t.Errorf("draft content changed between parse cycles\nfirst:\n%q\nsecond:\n%q", body1, body2)
+	}
+}
+
+func TestParseBody_NonDraftGetsNormalized(t *testing.T) {
+	// Test that regular emails (without X-Neomd-Draft) still get normalizePlainText applied.
+
+	originalBody := "Line 1\nLine 2"
+
+	// Regular email (no X-Neomd-Draft header)
+	regularMIME := "From: Alice <alice@example.com>\r\n" +
+		"To: Bob <bob@example.com>\r\n" +
+		"Subject: Regular Email\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		originalBody
+
+	body, _, _, _ := parseBody([]byte(regularMIME))
+
+	// Normalization should add two trailing spaces before the newline
+	expectedNormalized := "Line 1  \nLine 2"
+	if body != expectedNormalized {
+		t.Errorf("normalization not applied to regular email\ngot:\n%q\nwant:\n%q", body, expectedNormalized)
+	}
+}

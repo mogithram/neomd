@@ -975,6 +975,11 @@ func parseBody(raw []byte) (markdown, rawHTML, webURL string, attachments []Atta
 		return string(raw), "", "", nil
 	}
 
+	// Check if this is a neomd-authored draft. Drafts use the X-Neomd-Draft header
+	// to signal that the plain text body is already markdown and should not be
+	// normalized (which adds trailing spaces and would mutate the draft on each save/load).
+	isDraft := e.Header.Get("X-Neomd-Draft") == "true"
+
 	// List-Post header contains the canonical article URL on most newsletters:
 	//   List-Post: <https://newsletter.example.com/p/slug>
 	if lp := e.Header.Get("List-Post"); lp != "" {
@@ -1080,6 +1085,12 @@ func parseBody(raw []byte) (markdown, rawHTML, webURL string, attachments []Atta
 		return htmlToMarkdown(htmlText), htmlText, webURL, attachments
 	}
 	if plainText != "" {
+		// For neomd drafts, return the raw markdown without normalization.
+		// Normalization adds trailing spaces for hard line breaks, which would
+		// mutate the draft content on each save/reopen cycle.
+		if isDraft {
+			return plainText, "", webURL, attachments
+		}
 		return normalizePlainText(plainText), "", webURL, attachments
 	}
 	return "(no body)", "", webURL, attachments
