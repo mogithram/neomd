@@ -2424,6 +2424,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "R":
+		m.imapCli().ResetMailboxSelection() // force fresh SELECT to see new messages
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 
@@ -2790,6 +2791,7 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.launchReplyCmd()
 		}
 	case "R":
+		m.imapCli().ResetMailboxSelection() // force fresh SELECT to see new messages
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchFolderCmd(m.activeFolder()))
 	case "ctrl+r":

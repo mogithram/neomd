@@ -196,6 +196,15 @@ func (c *Client) Close() {
 	}
 }
 
+// ResetMailboxSelection clears the cached selected mailbox, forcing the next
+// FetchHeaders or similar operation to re-SELECT the mailbox and fetch fresh state.
+// This is useful when refreshing to ensure new messages are visible.
+func (c *Client) ResetMailboxSelection() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selectedMailbox = ""
+}
+
 // TokenSource returns the OAuth2 token source for this client, or nil for
 // password-authenticated accounts.
 func (c *Client) TokenSource() func() (string, error) { return c.cfg.TokenSource }
