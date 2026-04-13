@@ -107,10 +107,14 @@ func Prelude(to, cc, bcc, from, subject, signature string) string {
 }
 
 // ReplyPrelude builds a quote block for replies. cc and from may be empty.
+// buildQuotedReply builds the quoted "wrote:" section used in replies and reactions.
+func buildQuotedReply(originalFrom, originalBody string) string {
+	return fmt.Sprintf("---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
+		originalFrom, quoteLines(originalBody))
+}
+
 func ReplyPrelude(to, cc, subject, from, originalFrom, originalBody string) string {
-	return Prelude(to, cc, "", from, subject, "") +
-		fmt.Sprintf("---\n\n> **%s** wrote:\n>\n%s\n\n---\n\n",
-			originalFrom, quoteLines(originalBody))
+	return Prelude(to, cc, "", from, subject, "") + buildQuotedReply(originalFrom, originalBody)
 }
 
 // ForwardPrelude builds a quoted forward block. The To field is left empty for
@@ -130,16 +134,12 @@ func ForwardPrelude(subject, from, originalFrom, originalDate, originalTo, origi
 }
 
 // ReactionBody builds the plain text body for an emoji reaction.
-func ReactionBody(emoji, fromName string) string {
-	return fmt.Sprintf("%s\n\n%s reacted via neomd (https://neomd.ssp.sh)\n", emoji, fromName)
-}
-
-// ReactionBodyHTML builds the HTML body for an emoji reaction.
-func ReactionBodyHTML(emoji, fromName string) string {
-	return fmt.Sprintf(`<div style="font-size: 48px; margin: 20px 0;">%s</div>
-<p style="color: #666; font-size: 14px; margin-top: 40px; border-top: 1px solid #ddd; padding-top: 20px;">
-%s reacted via <a href="https://neomd.ssp.sh" style="color: #7E9CD8; text-decoration: none;">neomd</a>
-</p>`, emoji, fromName)
+// Includes the quoted original message below the emoji and footer.
+// Uses the same quoting logic as regular replies.
+func ReactionBody(emoji, fromName, originalFrom, originalBody string) string {
+	quoted := buildQuotedReply(originalFrom, originalBody)
+	return fmt.Sprintf("%s\n\n_%s reacted via [neomd](https://neomd.ssp.sh)_\n\n%s", emoji, fromName,
+  quoted)
 }
 
 // ParseHeaders scans raw editor content for # [neomd: key: value] lines and

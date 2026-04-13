@@ -51,6 +51,7 @@ type (
 		rawHTML     string // original HTML part, empty for plain-text emails
 		webURL      string // canonical "view online" URL (List-Post header or plain-text preamble)
 		attachments []imap.Attachment
+		references  string // References header for email threading
 	}
 	sendDoneMsg struct {
 		err           error
@@ -729,11 +730,11 @@ func (m Model) fetchFolderCmd(folder string) tea.Cmd {
 
 func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	return func() tea.Msg {
-		body, rawHTML, webURL, attachments, err := m.imapCli().FetchBody(nil, e.Folder, e.UID)
+		body, rawHTML, webURL, attachments, references, err := m.imapCli().FetchBody(nil, e.Folder, e.UID)
 		if err != nil {
 			return errMsg{err}
 		}
-		return bodyLoadedMsg{email: e, body: body, rawHTML: rawHTML, webURL: webURL, attachments: attachments}
+		return bodyLoadedMsg{email: e, body: body, rawHTML: rawHTML, webURL: webURL, attachments: attachments, references: references}
 	}
 }
 
@@ -808,9 +809,9 @@ func (m Model) sendReaction(emojiIndex int) (tea.Model, tea.Cmd) {
 		fromName = extractEmailAddr(from)
 	}
 
-	// Build reaction bodies
-	bodyPlain := editor.ReactionBody(emoji.emoji, fromName)
-	bodyHTML := editor.ReactionBodyHTML(emoji.emoji, fromName)
+	// Build reaction body (markdown) with quoted original message
+	// HTML will be generated from markdown by BuildReactionMessage (same as regular replies)
+	bodyMarkdown := editor.ReactionBody(emoji.emoji, fromName, e.From, m.openBody)
 
 	// Get SMTP account
 	smtpAcct := m.activeAccount()
@@ -833,11 +834,11 @@ func (m Model) sendReaction(emojiIndex int) (tea.Model, tea.Cmd) {
 
 	return m, tea.Batch(
 		m.spinner.Tick,
-		m.sendReactionCmd(smtpAcct, from, to, subject, bodyPlain, bodyHTML, e),
+		m.sendReactionCmd(smtpAcct, from, to, subject, bodyMarkdown, e),
 	)
 }
 
-func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject, bodyPlain, bodyHTML string, originalEmail *imap.Email) tea.Cmd {
+func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject, bodyMarkdown string, originalEmail *imap.Email) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -854,12 +855,18 @@ func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject,
 	replyCli := m.imapCli()
 
 	return func() tea.Msg {
-		// Build reaction message with threading headers
+		// Build References chain: use existing References or fall back to InReplyTo
+		references := originalEmail.References
+		if references == "" && originalEmail.InReplyTo != "" {
+			references = originalEmail.InReplyTo
+		}
+
+		// Build reaction message with threading headers (markdown will be converted to HTML)
 		raw, err := smtp.BuildReactionMessage(
 			from, to, "", subject,
-			bodyPlain, bodyHTML,
+			bodyMarkdown,
 			originalEmail.MessageID,
-			originalEmail.References,
+			references,
 		)
 		if err != nil {
 			return sendDoneMsg{err: fmt.Errorf("build reaction: %w", err)}
@@ -1625,6 +1632,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openHTMLBody = msg.rawHTML
 		m.openWebURL = msg.webURL
 		m.openAttachments = msg.attachments
+		// Store References header in the email struct for threading
+		if msg.email != nil {
+			msg.email.References = msg.references
+		}
 		// Mark as seen in background (best-effort)
 		uid := msg.email.UID
 		folder := msg.email.Folder
@@ -1962,7 +1973,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingSend.replyToAccount = m.activeAccount().Name
 			// Populate threading headers for proper email conversation threading
 			m.pendingSend.inReplyTo = m.openEmail.MessageID
-			m.pendingSend.references = m.openEmail.References
+			// Build References chain: use existing References or fall back to InReplyTo
+			if m.openEmail.References != "" {
+				m.pendingSend.references = m.openEmail.References
+			} else if m.openEmail.InReplyTo != "" {
+				// Fall back to InReplyTo if References not available
+				m.pendingSend.references = m.openEmail.InReplyTo
+			}
 		}
 		m.state = statePresend
 		m.status = ""
@@ -2451,14 +2468,10 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if idx := m.matchFromIndex(e.To, e.CC); idx >= 0 {
 			m.presendFromI = idx
 		}
-		// Check if we have Message-ID (needed for threading headers)
-		if e.MessageID == "" {
-			// Need to fetch body/headers first
-			m.pendingReaction = true
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
-		}
-		return m.enterReactionMode(e)
+		// Always fetch body first (needed for quoted message in reaction)
+		m.pendingReaction = true
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
 
 	case "f":
 		e := selectedEmail(m.inbox)

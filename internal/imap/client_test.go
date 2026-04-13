@@ -228,7 +228,7 @@ func TestParseBody_InlineImageContentID(t *testing.T) {
 		"iVBORw0KGgo=\r\n" +
 		"--" + boundary + "--\r\n"
 
-	_, _, _, attachments := parseBody([]byte(raw))
+	_, _, _, attachments, _ := parseBody([]byte(raw))
 
 	if len(attachments) == 0 {
 		t.Fatal("expected at least 1 attachment, got 0")
@@ -273,7 +273,7 @@ func TestParseBody_NoContentID(t *testing.T) {
 		"JVBERi0=\r\n" +
 		"--" + boundary + "--\r\n"
 
-	_, _, _, attachments := parseBody([]byte(raw))
+	_, _, _, attachments, _ := parseBody([]byte(raw))
 
 	if len(attachments) == 0 {
 		t.Fatal("expected at least 1 attachment, got 0")
@@ -334,7 +334,7 @@ Signature line 2`
 		originalBody
 
 	// First parse (simulating draft reopen)
-	body1, _, _, _ := parseBody([]byte(draftMIME))
+	body1, _, _, _, _ := parseBody([]byte(draftMIME))
 
 	// Verify the body matches exactly (no trailing spaces added)
 	if body1 != originalBody {
@@ -351,7 +351,7 @@ Signature line 2`
 		"\r\n" +
 		body1 // Use the result from first parse
 
-	body2, _, _, _ := parseBody([]byte(draftMIME2))
+	body2, _, _, _, _ := parseBody([]byte(draftMIME2))
 
 	// Verify still matches exactly (no accumulation of trailing spaces)
 	if body2 != originalBody {
@@ -378,7 +378,7 @@ func TestParseBody_NonDraftGetsNormalized(t *testing.T) {
 		"\r\n" +
 		originalBody
 
-	body, _, _, _ := parseBody([]byte(regularMIME))
+	body, _, _, _, _ := parseBody([]byte(regularMIME))
 
 	// Normalization should add two trailing spaces before the newline
 	expectedNormalized := "Line 1  \nLine 2"

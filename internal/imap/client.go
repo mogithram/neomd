@@ -715,12 +715,12 @@ func (c *Client) FetchHeadersByUID(ctx context.Context, folder string, uids []ui
 }
 
 // FetchBody fetches the body of a single message.
-// Returns (markdownBody, rawHTML, webURL, attachments, error).
-func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (string, string, string, []Attachment, error) {
+// Returns (markdownBody, rawHTML, webURL, attachments, references, error).
+func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (string, string, string, []Attachment, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var markdown, rawHTML, webURL string
+	var markdown, rawHTML, webURL, references string
 	var attachments []Attachment
 	err := c.withConn(ctx, func(conn *imapclient.Client) error {
 		if err := c.selectMailbox(folder); err != nil {
@@ -742,11 +742,11 @@ func (c *Client) FetchBody(ctx context.Context, folder string, uid uint32) (stri
 		}
 
 		if len(msgs[0].BodySection) > 0 {
-			markdown, rawHTML, webURL, attachments = parseBody(msgs[0].BodySection[0].Bytes)
+			markdown, rawHTML, webURL, attachments, references = parseBody(msgs[0].BodySection[0].Bytes)
 		}
 		return nil
 	})
-	return markdown, rawHTML, webURL, attachments, err
+	return markdown, rawHTML, webURL, attachments, references, err
 }
 
 // MoveMessage moves uid from src to dst using the IMAP MOVE command (RFC 6851).
@@ -972,16 +972,19 @@ func (c *Client) SaveDraft(ctx context.Context, folder string, raw []byte) error
 //   - rawHTML:      original HTML part verbatim (empty for plain-text emails)
 //   - webURL:       "view online" URL extracted from List-Post header or plain-text
 //     preamble (e.g. Substack's "View this post on the web at https://…")
-func parseBody(raw []byte) (markdown, rawHTML, webURL string, attachments []Attachment) {
+func parseBody(raw []byte) (markdown, rawHTML, webURL string, attachments []Attachment, references string) {
 	e, err := message.Read(bytes.NewReader(raw))
 	if err != nil && !message.IsUnknownCharset(err) {
-		return string(raw), "", "", nil
+		return string(raw), "", "", nil, ""
 	}
 
 	// Check if this is a neomd-authored draft. Drafts use the X-Neomd-Draft header
 	// to signal that the plain text body is already markdown and should not be
 	// normalized (which adds trailing spaces and would mutate the draft on each save/load).
 	isDraft := e.Header.Get("X-Neomd-Draft") == "true"
+
+	// Extract References header for email threading
+	references = e.Header.Get("References")
 
 	// List-Post header contains the canonical article URL on most newsletters:
 	//   List-Post: <https://newsletter.example.com/p/slug>
@@ -1085,18 +1088,18 @@ func parseBody(raw []byte) (markdown, rawHTML, webURL string, attachments []Atta
 	// text/plain part is typically a stripped dump with raw redirect URLs.
 	// Fall back to plain text for plain-text-only emails (e.g. direct replies).
 	if htmlText != "" {
-		return htmlToMarkdown(htmlText), htmlText, webURL, attachments
+		return htmlToMarkdown(htmlText), htmlText, webURL, attachments, references
 	}
 	if plainText != "" {
 		// For neomd drafts, return the raw markdown without normalization.
 		// Normalization adds trailing spaces for hard line breaks, which would
 		// mutate the draft content on each save/reopen cycle.
 		if isDraft {
-			return plainText, "", webURL, attachments
+			return plainText, "", webURL, attachments, references
 		}
-		return normalizePlainText(plainText), "", webURL, attachments
+		return normalizePlainText(plainText), "", webURL, attachments, references
 	}
-	return "(no body)", "", webURL, attachments
+	return "(no body)", "", webURL, attachments, references
 }
 
 // extractPlainTextWebURL looks for a "View … on the web at https://…" line
