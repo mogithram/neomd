@@ -809,9 +809,8 @@ func (m Model) sendReaction(emojiIndex int) (tea.Model, tea.Cmd) {
 		fromName = extractEmailAddr(from)
 	}
 
-	// Build reaction body (markdown) with quoted original message
-	// HTML will be generated from markdown by BuildReactionMessage (same as regular replies)
-	bodyMarkdown := editor.ReactionBody(emoji.emoji, fromName, e.From, m.openBody)
+	// Build reaction bodies: markdown (for HTML rendering) and plain text (for text/plain part)
+	bodyMarkdown, bodyPlainText := editor.ReactionBody(emoji.emoji, fromName, e.From, m.openBody)
 
 	// Get SMTP account
 	smtpAcct := m.activeAccount()
@@ -834,11 +833,11 @@ func (m Model) sendReaction(emojiIndex int) (tea.Model, tea.Cmd) {
 
 	return m, tea.Batch(
 		m.spinner.Tick,
-		m.sendReactionCmd(smtpAcct, from, to, subject, bodyMarkdown, e),
+		m.sendReactionCmd(smtpAcct, from, to, subject, bodyMarkdown, bodyPlainText, e),
 	)
 }
 
-func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject, bodyMarkdown string, originalEmail *imap.Email) tea.Cmd {
+func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject, bodyMarkdown, bodyPlainText string, originalEmail *imap.Email) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -861,10 +860,11 @@ func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject,
 			references = originalEmail.InReplyTo
 		}
 
-		// Build reaction message with threading headers (markdown will be converted to HTML)
+		// Build reaction message with threading headers
+		// markdown will be converted to HTML, plainText used for text/plain part
 		raw, err := smtp.BuildReactionMessage(
 			from, to, "", subject,
-			bodyMarkdown,
+			bodyPlainText, bodyMarkdown,
 			originalEmail.MessageID,
 			references,
 		)
@@ -1434,6 +1434,7 @@ func (m Model) scheduleBgSync() tea.Cmd {
 // Errors are swallowed — a transient network hiccup shouldn't disrupt the UI.
 func (m Model) bgFetchInboxCmd() tea.Cmd {
 	return func() tea.Msg {
+		m.imapCli().ResetMailboxSelection() // force fresh SELECT to see new messages
 		emails, err := m.imapCli().FetchHeaders(nil, m.cfg.Folders.Inbox, m.cfg.UI.InboxCount)
 		if err != nil {
 			return bgSyncTickMsg{} // reschedule retry on next tick instead of errMsg

@@ -686,3 +686,93 @@ func TestInferSMTPUseTLS(t *testing.T) {
 		})
 	}
 }
+func TestBuildReactionMessage_ThreadingHeaders(t *testing.T) {
+	plainText := "👍\n\nSimon reacted via neomd (https://neomd.ssp.sh)\n\n---\n\nJohn wrote:\n\n> Hello"
+	markdown := "👍\n\n_Simon reacted via [neomd](https://neomd.ssp.sh)_\n\n---\n\n> **John** wrote:\n>\n> Hello"
+	inReplyTo := "<original@example.com>"
+	references := "<first@example.com> <second@example.com>"
+
+	raw, err := BuildReactionMessage(
+		"simon@example.com",
+		"john@example.com",
+		"",
+		"Re: Test",
+		plainText,
+		markdown,
+		inReplyTo,
+		references,
+	)
+	if err != nil {
+		t.Fatalf("BuildReactionMessage: %v", err)
+	}
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+
+	// Verify In-Reply-To header
+	gotInReplyTo := msg.Header.Get("In-Reply-To")
+	if gotInReplyTo != inReplyTo {
+		t.Errorf("In-Reply-To = %q, want %q", gotInReplyTo, inReplyTo)
+	}
+
+	// Verify References header includes original references + inReplyTo
+	gotReferences := msg.Header.Get("References")
+	wantReferences := references + " " + inReplyTo
+	if gotReferences != wantReferences {
+		t.Errorf("References = %q, want %q", gotReferences, wantReferences)
+	}
+
+	// Verify multipart/alternative structure
+	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("ParseMediaType: %v", err)
+	}
+	if mediaType != "multipart/alternative" {
+		t.Errorf("Content-Type = %q, want multipart/alternative", mediaType)
+	}
+
+	// Verify plain text part has no markdown syntax
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	var foundPlainText, foundHTML bool
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("NextPart: %v", err)
+		}
+		ct := part.Header.Get("Content-Type")
+		body, _ := io.ReadAll(part)
+
+		if strings.Contains(ct, "text/plain") {
+			foundPlainText = true
+			bodyStr := string(body)
+			// Plain text should not have markdown syntax
+			if strings.Contains(bodyStr, "_") || strings.Contains(bodyStr, "[neomd]") {
+				t.Errorf("text/plain part contains markdown syntax: %s", bodyStr)
+			}
+			// Should contain plain text version
+			if !strings.Contains(bodyStr, "Simon reacted via neomd") {
+				t.Errorf("text/plain missing footer, got: %s", bodyStr)
+			}
+		}
+		if strings.Contains(ct, "text/html") {
+			foundHTML = true
+			// HTML should be rendered (not raw markdown)
+			bodyStr := string(body)
+			if !strings.Contains(bodyStr, "<") || !strings.Contains(bodyStr, ">") {
+				t.Errorf("text/html part is not HTML: %s", bodyStr)
+			}
+		}
+	}
+
+	if !foundPlainText {
+		t.Error("Missing text/plain part")
+	}
+	if !foundHTML {
+		t.Error("Missing text/html part")
+	}
+}

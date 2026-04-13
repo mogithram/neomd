@@ -386,3 +386,46 @@ func TestParseBody_NonDraftGetsNormalized(t *testing.T) {
 		t.Errorf("normalization not applied to regular email\ngot:\n%q\nwant:\n%q", body, expectedNormalized)
 	}
 }
+
+func TestParseBody_ReferencesExtraction(t *testing.T) {
+	// Build a test message with References header
+	raw := "From: test@example.com\r\n" +
+		"To: recipient@example.com\r\n" +
+		"Subject: Test\r\n" +
+		"Message-ID: <msg3@example.com>\r\n" +
+		"In-Reply-To: <msg2@example.com>\r\n" +
+		"References: <msg1@example.com> <msg2@example.com>\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		"Test body"
+
+	_, _, _, _, references := parseBody([]byte(raw))
+
+	wantReferences := "<msg1@example.com> <msg2@example.com>"
+	if references != wantReferences {
+		t.Errorf("References = %q, want %q", references, wantReferences)
+	}
+}
+
+func TestResetMailboxSelection(t *testing.T) {
+	// Verify that ResetMailboxSelection clears the cached selectedMailbox.
+	// This prevents stale mailbox state from suppressing new message visibility
+	// when refreshing (github.com/sspaeti/neomd#66 regression test).
+	c := &Client{
+		cfg: Config{
+			Host: "imap.example.com",
+			Port: "993",
+			TLS:  true,
+		},
+	}
+
+	// Simulate that a mailbox was previously selected
+	c.selectedMailbox = "INBOX"
+
+	// Reset should clear it
+	c.ResetMailboxSelection()
+
+	if c.selectedMailbox != "" {
+		t.Errorf("ResetMailboxSelection() did not clear selectedMailbox: got %q, want empty string", c.selectedMailbox)
+	}
+}
