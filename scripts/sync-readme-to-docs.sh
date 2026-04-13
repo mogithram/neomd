@@ -6,7 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 README="$REPO_ROOT/README.md"
-DOCS_OVERVIEW="$REPO_ROOT/docs/content/docs/overview.md"
+DOCS_OVERVIEW="$REPO_ROOT/docs/content/docs/_index.md"
 
 if [[ ! -f "$README" ]]; then
   echo "Error: README.md not found at $README"
@@ -71,5 +71,5 @@ END {
   -e 's|images/|/images/|g' \
   >> "$DOCS_OVERVIEW"
 
-echo "✅ Synced README.md → docs/content/docs/overview.md"
+echo "✅ Synced README.md → docs/content/docs/_index.md"
 echo "   Next: Run 'make docs-build' to regenerate the site"

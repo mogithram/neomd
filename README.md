@@ -131,12 +131,12 @@ yay -S neomd-bin
 
 On first run, neomd:
 1. Creates `~/.config/neomd/config.toml` with placeholders — fill in your IMAP/SMTP credentials
-    - Important: Make sure that the Capitalization and naming of folder in `config.toml` is accroding to webmail IMAP, e.g. [Gmails](docs/gmail.md) uses `sent = "[Gmail]/Sent Mail"` and not `sent` etc. 
+    - Important: Make sure that the Capitalization and naming of folder in `config.toml` is accroding to webmail IMAP, e.g. [Gmails](docs/content/docs/configurations/gmail.md) uses `sent = "[Gmail]/Sent Mail"` and not `sent` etc. 
 2. Creates `~/.config/neomd/lists/` for screener allowlists (or uses your custom paths from config)
 3. Creates any missing IMAP folders (ToScreen, Feed, PaperTrail, etc.) automatically
 
 
-Neomd also runs on Android (more for fun) — see [docs/android.md](docs/android.md).
+Neomd also runs on Android (more for fun) — see [docs/content/docs/configurations/android.md](docs/content/docs/android.md).
 
 ## Configuration
 
@@ -166,11 +166,11 @@ spam         = "~/.config/neomd/lists/spam.txt"
 
 Use an app-specific password (Gmail, Fastmail, Hostpoint, etc.) rather than your main account password. The `password` and `user` fields support environment variable expansion (`$VAR` or `${VAR}`) so you can avoid storing secrets in the config file.
 
-For the full configuration reference including multiple accounts, OAuth2 authentication, `[[senders]]` aliases, folder customization, signatures, and UI options, see [docs/configuration.md](docs/configuration.md).
+For the full configuration reference including multiple accounts, OAuth2 authentication, `[[senders]]` aliases, folder customization, signatures, and UI options, see [docs/content/docs/configuration.md](docs/content/docs/configuration.md).
 
 **Provider-specific guides:**
-- Gmail: [docs/gmail.md](docs/gmail.md) — folder name mapping and OAuth2 setup
-- Proton Mail Bridge: [docs/proton-bridge.md](docs/proton-bridge.md) — non-standard port configuration
+- Gmail: [docs/content/docs/configurations/gmail.md](docs/content/docs/configurations/gmail.md) — folder name mapping and OAuth2 setup
+- Proton Mail Bridge: [docs/content/docs/configurations/proton-bridge.md](docs/content/docs/configurations/proton-bridge.md) — non-standard port configuration
 
 ### Onboarding
 
@@ -201,12 +201,12 @@ You choose who can land in your Inbox. Bye-bye spam. This is the beauty of [HEY-
 
 ### Screener Workflow
 
-Find full Screener Workflow at [docs/screener.md](docs/screener.md), classification tables, and bulk re-classification instructions.
+Find full Screener Workflow at [docs/content/docs/screener.md](docs/content/docs/screener.md), classification tables, and bulk re-classification instructions.
 ### Keybindings
 
 Press `?` inside neomd to open the interactive help overlay. Start typing to filter shortcuts.
 
-See the [full keybindings reference](docs/keybindings.md) (auto-generated from [`internal/ui/keys.go`](internal/ui/keys.go) via `make docs`).
+See the [full keybindings reference](docs/content/docs/keybindings.md) (auto-generated from [`internal/ui/keys.go`](internal/ui/keys.go) via `make docs`).
 
 ### How Sending Works
 
@@ -214,8 +214,8 @@ Compose in Markdown, send as `multipart/alternative` (plain text + HTML). Attach
 
 Discarding unsent mail now asks for confirmation in compose/pre-send, and `:recover` reopens the latest backup if you want to resume after an abort.
 
-- See [docs/sending.md](docs/sending.md) for details on MIME structure, attachments, pre-send review, and drafts. 
-- See [docs/reading.md](docs/reading.md) for the reader: images, inline links, attachments, and navigation.
+- See [docs/content/docs/sending.md](docs/content/docs/sending.md) for details on MIME structure, attachments, pre-send review, and drafts. 
+- See [docs/content/docs/reading.md](docs/content/docs/reading.md) for the reader: images, inline links, attachments, and navigation.
 
 ### Dev: Makefile Commands
 
@@ -278,7 +278,7 @@ Interestingly, Gmail benchmarks fast on a **fresh single connection** (`scripts/
 
 
 > [!NOTE]
-> **Gmail is not recommended.** If you're on Gmail, consider a dedicated email provider (Hostpoint, Fastmail, HEY, Migadu, etc.) for the best neomd experience. Or use Gmail just for fun :). See [docs/gmail.md](docs/gmail.md) for Gmail-specific folder configuration.
+> **Gmail is not recommended.** If you're on Gmail, consider a dedicated email provider (Hostpoint, Fastmail, HEY, Migadu, etc.) for the best neomd experience. Or use Gmail just for fun :). See [docs/content/docs/configurations/gmail.md](docs/content/docs/configurations/gmail.md) for Gmail-specific folder configuration.
 
 **Test your own provider:**
 ```bash
@@ -311,7 +311,7 @@ This TUI is mostly [vibe-coded](https://www.ssp.sh/brain/vibe-coding) in the sen
 
 I used my experience with Neomutt, TUIs, and the GTD workflow for handling emails with HEY Screener, and added some (hopefully) _taste_ using my favorite tools and aesthetics. Find the full history at [Twitter](https://xcancel.com/sspaeti/status/2036539855182627169#m) - inspired by seeing [Email.md](https://www.emailmd.dev/) on HackerNews.
 
-If you [rather read the prompt](https://www.ssp.sh/brain/id-rather-read-the-prompt), check out my [initial prompt](docs/initial-prompt/prompt.md) and its generated [plan](docs/initial-prompt/prompt-plan.md) - which I have iterated and added features by the 100s since then.
+If you [rather read the prompt](https://www.ssp.sh/brain/id-rather-read-the-prompt), check out my [initial prompt](https://github.com/ssp-data/neomd/blob/main/docs/initial-prompt/prompt.md) and its generated [plan](https://github.com/ssp-data/neomd/blob/main/docs/initial-prompt/prompt-plan.md) - which I have iterated and added features by the 100s since then.
 ## Roadmap
 
 See at my second brain at [Roadmap](https://www.ssp.sh/brain/neomd#roadmap).

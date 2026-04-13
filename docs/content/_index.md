@@ -17,7 +17,7 @@ toc: false
 </div>
 
 <div class="hx-mb-6">
-{{< hextra/hero-button text="Overview and Philosophy" link="docs/overview" >}}
+{{< hextra/hero-button text="Overview and Philosophy" link="docs" >}}
 </div>
 
 <div class="hx-mt-6"></div>
@@ -80,7 +80,7 @@ YouTube rundown of most features:
 </div>
 
 {{< cards cols="3" >}}
-  {{< card link="docs/overview" title="Overview & Philosophy" subtitle="Full feature list, installation (binary, AUR, source), philosophy, benchmarks, and inspiration" >}}
+  {{< card link="docs" title="Overview & Philosophy" subtitle="Full feature list, installation (binary, AUR, source), philosophy, benchmarks, and inspiration" >}}
   {{< card link="docs/configuration" title="Configuration Reference" subtitle="Full config with multiple accounts, OAuth2, signatures, and UI options" >}}
   {{< card link="docs/keybindings" title="Keybindings" subtitle="Complete keyboard shortcuts reference (auto-generated from source)" >}}
   {{< card link="docs/screener" title="Screener Workflow" subtitle="How to classify emails, bulk operations, and screener lists" >}}
@@ -91,7 +91,7 @@ YouTube rundown of most features:
 <br>
 
 <div class="hx-mb-6">
-{{< hextra/hero-button text="Getting Started: Install" link="docs/overview#install" >}}
+{{< hextra/hero-button text="Getting Started: Install" link="docs#install" >}}
 </div>
 
 
