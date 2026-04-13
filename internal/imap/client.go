@@ -49,6 +49,7 @@ type Email struct {
 	HasAttachment bool   // true if BODYSTRUCTURE contains an attachment part
 	MessageID     string // Message-ID from envelope (for threading)
 	InReplyTo     string // first In-Reply-To message ID (for threading)
+	References    string // References header (space-separated Message-IDs for threading)
 }
 
 // Config holds connection parameters.
@@ -325,6 +326,8 @@ func (c *Client) FetchHeaders(ctx context.Context, folder string, n int) ([]Emai
 				if len(m.Envelope.InReplyTo) > 0 {
 					e.InReplyTo = m.Envelope.InReplyTo[0]
 				}
+				// Note: References header is fetched when the body is loaded (FetchBody)
+				// because it's not available in the IMAP Envelope structure.
 			}
 			e.Size = uint32(m.RFC822Size)
 			e.HasAttachment = hasAttachment(m.BodyStructure)

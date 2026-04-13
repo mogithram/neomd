@@ -129,6 +129,19 @@ func ForwardPrelude(subject, from, originalFrom, originalDate, originalTo, origi
 	return s
 }
 
+// ReactionBody builds the plain text body for an emoji reaction.
+func ReactionBody(emoji, fromName string) string {
+	return fmt.Sprintf("%s\n\n%s reacted via neomd (https://neomd.ssp.sh)\n", emoji, fromName)
+}
+
+// ReactionBodyHTML builds the HTML body for an emoji reaction.
+func ReactionBodyHTML(emoji, fromName string) string {
+	return fmt.Sprintf(`<div style="font-size: 48px; margin: 20px 0;">%s</div>
+<p style="color: #666; font-size: 14px; margin-top: 40px; border-top: 1px solid #ddd; padding-top: 20px;">
+%s reacted via <a href="https://neomd.ssp.sh" style="color: #7E9CD8; text-decoration: none;">neomd</a>
+</p>`, emoji, fromName)
+}
+
 // ParseHeaders scans raw editor content for # [neomd: key: value] lines and
 // returns the extracted to, cc, bcc, from, subject values and the remaining body
 // (with header lines stripped). Any field not found is returned as "".

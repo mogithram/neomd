@@ -36,6 +36,7 @@ const (
 	statePresend           // pre-send review: add attachments, then send or edit again
 	stateHelp              // help overlay
 	stateWelcome           // first-run welcome popup
+	stateReaction          // emoji reaction picker
 )
 
 // async message types
@@ -395,6 +396,9 @@ type pendingSendData struct {
 	replyToUID     uint32
 	replyToFolder  string
 	replyToAccount string
+	// Threading headers for proper email conversation threading
+	inReplyTo  string
+	references string
 }
 
 // undoMove records one IMAP move so it can be reversed with u.
@@ -451,6 +455,11 @@ type Model struct {
 	attachments  []string // files to attach to the next send (cleared after send)
 	pendingSend  *pendingSendData
 	presendFromI int // index into presendFroms() for the From field cycle
+
+	// Reaction
+	reactionEmail    *imap.Email // email being reacted to
+	reactionSelected int         // selected emoji index (0-7)
+	pendingReaction  bool        // true if we need to fetch body before entering reaction mode
 
 	// Status / error
 	status        string
@@ -728,7 +737,7 @@ func (m Model) fetchBodyCmd(e *imap.Email) tea.Cmd {
 	}
 }
 
-func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, includeHTMLSig bool, replyToUID uint32, replyToFolder, replyToAccount string) tea.Cmd {
+func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, subject, body string, attachments []string, includeHTMLSig bool, replyToUID uint32, replyToFolder, replyToAccount, inReplyTo, references string) tea.Cmd {
 	h, p := splitAddr(smtpAcct.SMTP)
 	cfg := smtp.Config{
 		Host:        h,
@@ -750,7 +759,7 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 	return func() tea.Msg {
 		// Build raw MIME once — reused for both SMTP delivery and Sent copy.
 		// BCC is intentionally excluded from headers but included in RCPT TO.
-		raw, err := smtp.BuildMessage(from, to, cc, subject, body, attachments, htmlSignature)
+		raw, err := smtp.BuildMessageWithThreading(from, to, cc, subject, body, attachments, htmlSignature, inReplyTo, references)
 		if err != nil {
 			return sendDoneMsg{err: fmt.Errorf("build message: %w", err)}
 		}
@@ -767,6 +776,116 @@ func (m Model) sendEmailCmd(smtpAcct config.AccountConfig, from, to, cc, bcc, su
 			_ = replyCli.MarkAnswered(nil, replyToFolder, replyToUID)
 		}
 		return sendDoneMsg{replyToUID: replyToUID, replyToFolder: replyToFolder}
+	}
+}
+
+func (m Model) sendReaction(emojiIndex int) (tea.Model, tea.Cmd) {
+	if m.reactionEmail == nil || emojiIndex < 0 || emojiIndex >= len(defaultReactions) {
+		return m, nil
+	}
+
+	emoji := defaultReactions[emojiIndex]
+	e := m.reactionEmail
+
+	// Determine recipient (Reply-To takes precedence over From)
+	to := e.ReplyTo
+	if to == "" {
+		to = e.From
+	}
+
+	// Build subject with "Re:" prefix
+	subject := e.Subject
+	low := strings.ToLower(subject)
+	if !strings.HasPrefix(low, "re:") && !strings.HasPrefix(low, "aw:") &&
+		!strings.HasPrefix(low, "sv:") && !strings.HasPrefix(low, "vs:") {
+		subject = "Re: " + subject
+	}
+
+	// Extract sender name for footer
+	from := m.presendFrom()
+	fromName := extractName(from)
+	if fromName == "" {
+		fromName = extractEmailAddr(from)
+	}
+
+	// Build reaction bodies
+	bodyPlain := editor.ReactionBody(emoji.emoji, fromName)
+	bodyHTML := editor.ReactionBodyHTML(emoji.emoji, fromName)
+
+	// Get SMTP account
+	smtpAcct := m.activeAccount()
+	if m.presendFromI > 0 && m.presendFromI-1 < len(m.cfg.Senders) {
+		// Sender alias selected; find its SMTP account
+		alias := m.cfg.Senders[m.presendFromI-1]
+		for _, acc := range m.accounts {
+			if acc.Name == alias.Account {
+				smtpAcct = acc
+				break
+			}
+		}
+	}
+
+	// Reset state before sending
+	m.state = m.prevState
+	m.loading = true
+	m.status = fmt.Sprintf("Sending %s...", emoji.emoji)
+	m.reactionEmail = nil
+
+	return m, tea.Batch(
+		m.spinner.Tick,
+		m.sendReactionCmd(smtpAcct, from, to, subject, bodyPlain, bodyHTML, e),
+	)
+}
+
+func (m Model) sendReactionCmd(smtpAcct config.AccountConfig, from, to, subject, bodyPlain, bodyHTML string, originalEmail *imap.Email) tea.Cmd {
+	h, p := splitAddr(smtpAcct.SMTP)
+	cfg := smtp.Config{
+		Host:        h,
+		Port:        p,
+		User:        smtpAcct.User,
+		Password:    smtpAcct.Password,
+		From:        from,
+		STARTTLS:    smtpAcct.STARTTLS,
+		TLSCertFile: smtpAcct.TLSCertFile,
+		TokenSource: m.tokenSourceFor(smtpAcct.Name),
+	}
+	cli := m.sentDraftsIMAPClient()
+	sentFolder := m.cfg.Folders.Sent
+	replyCli := m.imapCli()
+
+	return func() tea.Msg {
+		// Build reaction message with threading headers
+		raw, err := smtp.BuildReactionMessage(
+			from, to, "", subject,
+			bodyPlain, bodyHTML,
+			originalEmail.MessageID,
+			originalEmail.References,
+		)
+		if err != nil {
+			return sendDoneMsg{err: fmt.Errorf("build reaction: %w", err)}
+		}
+
+		// Send via SMTP
+		toAddrs := []string{extractEmailAddr(to)}
+		if err := smtp.SendRaw(cfg, toAddrs, raw); err != nil {
+			return sendDoneMsg{err: err}
+		}
+
+		// Save copy to Sent folder (non-fatal if it fails)
+		if saveErr := cli.SaveSent(nil, sentFolder, raw); saveErr != nil {
+			return sendDoneMsg{
+				warning:       "Sent, but failed to save to Sent folder: " + saveErr.Error(),
+				replyToUID:    originalEmail.UID,
+				replyToFolder: originalEmail.Folder,
+			}
+		}
+
+		// Mark original email as \Answered (non-fatal)
+		if originalEmail.UID > 0 && originalEmail.Folder != "" {
+			_ = replyCli.MarkAnswered(nil, originalEmail.Folder, originalEmail.UID)
+		}
+
+		return sendDoneMsg{replyToUID: originalEmail.UID, replyToFolder: originalEmail.Folder}
 	}
 }
 
@@ -1522,6 +1641,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingReplyAll = false
 			return m.launchReplyAllCmd()
 		}
+		if m.pendingReaction {
+			m.pendingReaction = false
+			return m.enterReactionMode(msg.email)
+		}
 		m.openLinks = extractLinks(msg.body)
 		_ = loadEmailIntoReader(&m.reader, msg.email, msg.body, msg.attachments, m.openLinks, m.cfg.UI.Theme, m.width)
 		m.state = stateReading
@@ -1837,6 +1960,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingSend.replyToUID = m.openEmail.UID
 			m.pendingSend.replyToFolder = m.openEmail.Folder
 			m.pendingSend.replyToAccount = m.activeAccount().Name
+			// Populate threading headers for proper email conversation threading
+			m.pendingSend.inReplyTo = m.openEmail.MessageID
+			m.pendingSend.references = m.openEmail.References
 		}
 		m.state = statePresend
 		m.status = ""
@@ -1879,6 +2005,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Any key dismisses the welcome popup
 			m.state = stateInbox
 			return m, nil
+		case stateReaction:
+			return m.updateReaction(msg)
 		}
 	}
 
@@ -2315,6 +2443,23 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
 
+	case "ctrl+e":
+		e := selectedEmail(m.inbox)
+		if e == nil {
+			return m, nil
+		}
+		if idx := m.matchFromIndex(e.To, e.CC); idx >= 0 {
+			m.presendFromI = idx
+		}
+		// Check if we have Message-ID (needed for threading headers)
+		if e.MessageID == "" {
+			// Need to fetch body/headers first
+			m.pendingReaction = true
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchBodyCmd(e))
+		}
+		return m.enterReactionMode(e)
+
 	case "f":
 		e := selectedEmail(m.inbox)
 		if e == nil {
@@ -2637,6 +2782,10 @@ func (m Model) updateReader(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+r":
 		if m.openEmail != nil {
 			return m.launchReplyAllCmd()
+		}
+	case "ctrl+e":
+		if m.openEmail != nil {
+			return m.enterReactionMode(m.openEmail)
 		}
 	case "f":
 		if m.openEmail != nil {
@@ -3112,7 +3261,7 @@ func (m Model) updatePresend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		includeHTMLSig, cleanBody := extractHTMLSignatureMarker(ps.body)
 		m.attachments = nil
 		m.pendingSend = nil
-		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, cleanBody, attachments, includeHTMLSig, replyUID, replyFolder, ps.replyToAccount))
+		return m, tea.Batch(m.spinner.Tick, m.sendEmailCmd(smtpAcct, from, ps.to, ps.cc, ps.bcc, ps.subject, cleanBody, attachments, includeHTMLSig, replyUID, replyFolder, ps.replyToAccount, ps.inReplyTo, ps.references))
 	case "ctrl+f":
 		froms := m.presendFroms()
 		if len(froms) <= 1 {
@@ -3468,6 +3617,21 @@ func (m Model) launchReplyAllCmd() (tea.Model, tea.Cmd) {
 	return m.launchReplyWithCC("", true)
 }
 
+func (m Model) enterReactionMode(e *imap.Email) (tea.Model, tea.Cmd) {
+	m.prevState = m.state
+	m.state = stateReaction
+	m.reactionEmail = e
+	m.reactionSelected = 0
+	m.pendingReaction = false
+
+	// Pre-select the correct From address (same logic as reply)
+	if idx := m.matchFromIndex(e.To, e.CC); idx >= 0 {
+		m.presendFromI = idx
+	}
+
+	return m, nil
+}
+
 func (m Model) launchForwardCmd() (tea.Model, tea.Cmd) {
 	e := m.openEmail
 	if e == nil {
@@ -3677,6 +3841,18 @@ func extractEmailAddr(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// extractName extracts the name part from "Name <email@example.com>" format.
+// Returns empty string if there's no name part.
+func extractName(s string) string {
+	if i := strings.IndexByte(s, '<'); i >= 0 {
+		name := strings.TrimSpace(s[:i])
+		// Remove quotes if present
+		name = strings.Trim(name, "\"")
+		return name
+	}
+	return ""
+}
+
 // splitAddrs splits a comma-separated address list, skipping empty entries.
 func splitAddrs(s string) []string {
 	var out []string
@@ -3785,6 +3961,8 @@ func (m Model) View() string {
 		return m.viewHelp()
 	case stateWelcome:
 		return m.viewWelcome()
+	case stateReaction:
+		return m.viewReaction()
 	}
 	return ""
 }
@@ -3941,6 +4119,36 @@ func (m Model) viewCompose() string {
 		b.WriteString(composeHelp(int(m.compose.step), len(m.presendFroms()) > 1))
 	}
 	return b.String()
+}
+
+func (m Model) updateReaction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.state = m.prevState
+		m.reactionEmail = nil
+		return m, nil
+
+	case "j", "down":
+		if m.reactionSelected < len(defaultReactions)-1 {
+			m.reactionSelected++
+		}
+
+	case "k", "up":
+		if m.reactionSelected > 0 {
+			m.reactionSelected--
+		}
+
+	case "1", "2", "3", "4", "5", "6", "7", "8":
+		idx, _ := strconv.Atoi(msg.String())
+		if idx >= 1 && idx <= len(defaultReactions) {
+			return m.sendReaction(idx - 1)
+		}
+
+	case "enter":
+		return m.sendReaction(m.reactionSelected)
+	}
+
+	return m, nil
 }
 
 func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
