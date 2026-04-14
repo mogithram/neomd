@@ -105,9 +105,17 @@ func renderEmailHeader(e *imap.Email, attachments []imap.Attachment, width int) 
 	lines := []string{
 		styleFrom.Render("From:    ") + e.From,
 		styleDate.Render("To:      ") + e.To,
-		styleSubject.Render("Subject: ") + e.Subject,
-		styleDate.Render("Date:    ") + fmtDateFull(e.Date),
 	}
+	if e.CC != "" {
+		lines = append(lines, styleDate.Render("Cc:      ")+e.CC)
+	}
+	if e.BCC != "" {
+		lines = append(lines, styleDate.Render("Bcc:     ")+e.BCC)
+	}
+	lines = append(lines,
+		styleSubject.Render("Subject: ")+e.Subject,
+		styleDate.Render("Date:    ")+fmtDateFull(e.Date),
+	)
 
 	if len(attachments) > 0 {
 		var parts []string
