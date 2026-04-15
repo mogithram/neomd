@@ -1,6 +1,6 @@
 ---
 title: Platform Guides
-weight: 50
+weight: 20
 sidebar:
   open: false
 ---

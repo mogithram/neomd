@@ -86,6 +86,7 @@ YouTube rundown of most features:
   {{< card link="docs/screener" title="Screener Workflow" subtitle="How to classify emails, bulk operations, and screener lists" >}}
   {{< card link="docs/reading" title="Reading Emails" subtitle="Navigation, images, links, attachments, threading" >}}
   {{< card link="docs/sending" title="Sending Emails" subtitle="Compose, attachments, CC/BCC, drafts, HTML signatures" >}}
+  {{< card link="docs/faq" title="FAQ" subtitle="Frequently asked questions" >}}
 {{< /cards >}}
 
 <br>
