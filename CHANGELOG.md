@@ -1,5 +1,8 @@
 # Changelog
 
+# 2026-04-15
+- **Scheduled folder keybindings** — added `gc` (go to Scheduled, mnemonic: "calendar") and `Mc` (move to Scheduled) shortcuts; Scheduled folder now accessible via dedicated keybindings alongside existing tab navigation (`[]HL`, `space+1-9`); help overlay and generated keybindings documentation updated
+
 # 2026-04-14
 - **Extended link support (99 links)** — link opener now supports up to 99 links per email (previously limited to 10); `space+1-0` opens links 1-10, `space+l11-99` opens links 11-99 using intuitive numeric shortcuts (e.g. `space+l26` for link [26]); status line provides progressive feedback during multi-key input; footer help and `?` overlay updated
 - **Fix: link extraction with brackets in text** — markdown link regex now correctly matches links with brackets inside the link text (e.g. `[[Watch the studio tour here]](url)`); changed from `[^\]]+` (anything except `]`) to non-greedy `.+?` to handle nested brackets; fixes newsletter links from Beehiiv and similar services

@@ -8,17 +8,30 @@ Questions that came up when people using neomd.
 
 ## Is it possible to create new directories/tabs
 
-You basically create the folder in your web mail and configure it in your `config.toml` and add the new folder under `[folder]` and in the `tab_order` so neomd knows where to place it:
+Currently, no. All folders are hard coded in a struct in a code as this is optimized for the GTD and HEY Screener workflow and keeps things simple.
+
+But, please reach out to me and tell me which folders you need, maybe it's a folder that everyone might use, or otherwise, if I get enough request, I add a way to customize folders as I do with the sort order of folder tabs already.
 
 
-```toml
-[folders]
-  ...existing folders
-  new = "NewMissingFolder"
-  tab_order = ["inbox", "to_screen", "feed", "papertrail", "waiting", "someday", "scheduled", "sent", "work", "archive", "screened_out", "trash", "new"]
+### Advanced: Add custom folders yourself
+
+You can fork neomd and modify the Go source code:
+
+1. **Edit the code** (ask Claude to help with this):
+    - Add a field to `FoldersConfig` struct in `internal/config/config.go`
+    - Add entry to `keyToLabel` map
+    - Optionally add keyboard shortcuts in `internal/ui/model.go`
+ - Run `make build` to compile
+2. **Create the IMAP folder** via webmail (e.g., "NewFolder")
+3. **Configure it** in your `config.toml`:
+ ```toml
+ [folders]
+   # ... existing folders ...
+   new = "NewFolder"
+   tab_order = ["inbox", "to_screen", "feed", "new", "sent", "archive"]
 ```
 
-If you want to move emails to that folder, or just move to it, that's currently not possible. You can always move through the tabs with `[]HL` or `space+1-10`, but you can't move emails to them yet.
+Once added this way, you can navigate to your custom folder with existing `[]HL` and `space+1-9`. If you added keyboard shortcuts in step 1, those will work too (e.g., gn / Mn).
 
 ## Does the signature appear only in new messages, not in replies?
 

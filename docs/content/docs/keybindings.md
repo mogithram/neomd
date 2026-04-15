@@ -40,6 +40,7 @@ To update both the help overlay and this document at once, edit that file and ru
 | `gk` | go to ToScreen |
 | `go` | go to ScreenedOut |
 | `gw` | go to Waiting |
+| `gc` | go to Scheduled (calendar) |
 | `gb` | go to Work (if configured) |
 | `gm` | go to Someday |
 | `gd` | go to Drafts |
@@ -72,6 +73,7 @@ To update both the help overlay and this document at once, edit that file and ru
 | `Mt` | move to Trash |
 | `Mo` | move to ScreenedOut |
 | `Mw` | move to Waiting |
+| `Mc` | move to Scheduled |
 | `Mb` | move to Work (if configured) |
 | `Mm` | move to Someday |
 | `Mk` | move to ToScreen |

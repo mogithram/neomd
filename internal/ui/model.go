@@ -2194,7 +2194,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Chord prefixes ──────────────────────────────────────────────
 	case "g":
 		m.pendingKey = "g"
-		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gm someday  gd drafts  gS spam  ge everything  gg top"
+		m.status = "go to:  gi inbox  ga archive  gf feed  gp papertrail  gt trash  gs sent  gk toscreen  go screened-out  gw waiting  gc scheduled  gm someday  gd drafts  gS spam  ge everything  gg top"
 		return m, nil
 
 	case " ": // leader key — wait for digit or shortcut
@@ -2204,7 +2204,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "M":
 		m.pendingKey = "M"
-		m.status = "move to:  Mi inbox  Ma archive  Mf feed  Mp papertrail  Mt trash  Mo screened-out  Mw waiting  Mm someday"
+		m.status = "move to:  Mi inbox  Ma archive  Mf feed  Mp papertrail  Mt trash  Mo screened-out  Mw waiting  Mc scheduled  Mm someday"
 		return m, nil
 
 	case ",":
@@ -2660,6 +2660,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"a": "Archive",
 			"w": "Waiting",
 			"b": "Work",
+			"c": "Scheduled",
 			"m": "Someday",
 			"o": "ScreenedOut",
 		}
@@ -2692,6 +2693,7 @@ func (m Model) handleChord(prefix, key string) (tea.Model, tea.Cmd) {
 			"t": m.cfg.Folders.Trash,
 			"o": m.cfg.Folders.ScreenedOut,
 			"w": m.cfg.Folders.Waiting,
+			"c": m.cfg.Folders.Scheduled,
 			"m": m.cfg.Folders.Someday,
 			"k": m.cfg.Folders.ToScreen,
 		}
