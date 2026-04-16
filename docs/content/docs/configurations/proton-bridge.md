@@ -42,7 +42,7 @@ Add the following to your `~/.config/neomd/config.toml` - notice that you cannot
   someday = "Folders/Someday"
   spam = "Spam"
   work = ""
-  tab_order = ["inbox", "to_screen", "feed", "papertrail", "waiting", "sched", "someday", "archive", "sent", "drafts", "screened_out", "spam", "trash"]
+  tab_order = ["inbox", "to_screen", "feed", "papertrail", "waiting", "scheduled", "someday", "archive", "sent", "drafts", "screened_out", "spam", "trash"]
 
 ```
 

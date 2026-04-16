@@ -6,6 +6,7 @@ weight: 50
 Questions that came up when people using neomd.
 
 
+
 ## Is it possible to create new directories/tabs
 
 Currently, no. All folders are hard coded in a struct in a code as this is optimized for the GTD and HEY Screener workflow and keeps things simple.
@@ -61,3 +62,14 @@ BR Simon
 ```
 
 The html-signature is the placeholder for adding the HTML signature, but yes, it will always be added at the end of the email (e.g. in this case the reply).
+
+## The Drafts and Spam folders seem to show wrong emails
+
+Drafts and Spam are **off-tab folders** (not in the regular tab rotation) and behave slightly differently:
+
+- **Access**: `gd` for Drafts, `gS` for Spam (or `:go-spam`)
+- **Indication**: When viewing them, the folder name appears highlighted in the tab bar with a `│` separator
+- **Reload**: Pressing `R` reloads the Drafts/Spam folder 
+- **Leave**: Press `tab` or navigate to another folder (`gi`, `ga`, etc.) to return to regular tabs
+
+**Old bug (fixed 2026-04-10)**: In older versions, pressing `R` while viewing Drafts could show Inbox content. If you experience this, rebuild neomd to get the fix.

@@ -21,7 +21,9 @@ With the **HEY-Screener**, you get only emails in your inbox that you _screened 
 
 With the [GTD approach](https://www.ssp.sh/brain/getting-things-done-gtd), using folders such as next (inbox), waiting, someday, scheduled, or archive, you can move them with one shortcut. This allows you quickly to move emails you need to wait for, or deal with later, in the right category. **Processing your email only once**.
 
-With the additional **Feed** and **Papertrail**, two additional features from HEY, you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
+Also, we intentionally don't add more folders to the archive or file emails too, only archive (and work if you use business/personal - but that's not even needed). The goal is to let emails fade out, avoid the "busy work," and file them. We use search when we need it, or copy important information into Obsidian or our daily work. That's why we only have limited folders (and also why we currently can't add additional ones; see [FAQ](https://ssp-data.github.io/neomd/docs/faq/#is-it-possible-to-create-new-directoriestabs).
+
+But we have two additional **Feed** and **Papertrail**, two dedicated folders from HEY where you can read newsletters (just hit F) on them automatically in their separate tab, or move all your receipts into the Papertrail. Once you mark them as feed or papertrail, they will moved there automatically going forward. So you decide whether to read emails or news by jumping to different tabs.
 
 
 {{< callout type="info" >}}
