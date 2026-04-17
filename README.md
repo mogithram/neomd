@@ -69,10 +69,10 @@ flowchart TD
     Review --> Archive
     ReadLater --> Archive
 
-    classDef folderStyle fill:#7fb4ca,stroke:#333,stroke-width:2px
+    classDef folderStyle fill:#54546d,stroke:#7fb4ca,stroke-width:2px,color:#dcd7ba
     class ToScreen,Inbox,ScreenedOut,Feed,PaperTrail,Archive,Waiting,Someday,Scheduled,Trash folderStyle
 ```
-*blue are all the folders in neomd*
+*Styled with Kanagawa colors - all boxes represent neomd folders*
 
 **Key principles:**
 - **Screener first**: Unknown senders never clutter your Inbox — they wait in ToScreen for classification
